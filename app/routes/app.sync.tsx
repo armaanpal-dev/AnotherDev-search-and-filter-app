@@ -6,7 +6,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
-import { runFullSync } from "../lib/sync/bulk.server";
+import { runFullSync, isSyncRunning } from "../lib/sync/bulk.server";
 import { getPlanStatus } from "../lib/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -32,6 +32,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
   const { limits } = await getPlanStatus(billing);
 
+  // Double-clicking the button used to start a second sync that fought the first
+  // for the same rows. `runFullSync` refuses when a live run exists, but check
+  // here too so the UI can say so instead of silently doing nothing.
+  if (await isSyncRunning(shop.id)) {
+    return { started: false, alreadyRunning: true };
+  }
+
   // Kick the sync off in the background; the page polls SyncState for progress.
   runFullSync(shop.id, admin as any, {
     productLimit: limits.productLimit === Infinity ? undefined : limits.productLimit,
@@ -39,7 +46,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.error("Full sync failed:", e);
   });
 
-  return { started: true };
+  return { started: true, alreadyRunning: false };
 };
 
 export default function SyncPage() {

@@ -6,9 +6,11 @@
 export interface WidgetSettings {
   // Behaviour
   autoAttach: boolean;          // upgrade the theme's own search box
+  searchTakeover: boolean;      // hijack the theme's /search page with our results
   showRecommendations: boolean; // recommendations when the box is empty
   recentSearches: boolean;      // remember this shopper's recent searches
   typoTolerance: boolean;
+  semanticSearch: boolean;      // blend embedding similarity into ranking (Pro)
   showOutOfStock: boolean;
   minChars: number;
   maxSuggestions: number;
@@ -21,6 +23,7 @@ export interface WidgetSettings {
   resultsPerPage: number;
   gridColumns: number;
   showVendor: boolean;
+  quickAdd: boolean;            // add-to-cart straight from the results grid
   // Appearance
   accentColor: string;
   backgroundColor: string;
@@ -28,13 +31,17 @@ export interface WidgetSettings {
   highlightColor: string;
   fontSize: number;
   fontWeight: string;
+  // option value -> CSS colour or image URL, e.g. { "royal blue": "#4169e1" }
+  swatches: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: WidgetSettings = {
   autoAttach: true,
+  searchTakeover: true,
   showRecommendations: true,
   recentSearches: true,
   typoTolerance: true,
+  semanticSearch: false,
   showOutOfStock: false,
   minChars: 2,
   maxSuggestions: 8,
@@ -45,12 +52,14 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   resultsPerPage: 24,
   gridColumns: 4,
   showVendor: false,
+  quickAdd: false,
   accentColor: "#111111",
   backgroundColor: "#ffffff",
   textColor: "#1a1a1a",
   highlightColor: "#4f46e5",
   fontSize: 14,
   fontWeight: "400",
+  swatches: {},
 };
 
 /** Merge stored (partial) settings over defaults, coercing types safely. */
@@ -58,9 +67,11 @@ export function resolveSettings(stored: unknown): WidgetSettings {
   const s = (stored ?? {}) as Partial<WidgetSettings>;
   return {
     autoAttach: bool(s.autoAttach, DEFAULT_SETTINGS.autoAttach),
+    searchTakeover: bool(s.searchTakeover, DEFAULT_SETTINGS.searchTakeover),
     showRecommendations: bool(s.showRecommendations, DEFAULT_SETTINGS.showRecommendations),
     recentSearches: bool(s.recentSearches, DEFAULT_SETTINGS.recentSearches),
     typoTolerance: bool(s.typoTolerance, DEFAULT_SETTINGS.typoTolerance),
+    semanticSearch: bool(s.semanticSearch, DEFAULT_SETTINGS.semanticSearch),
     showOutOfStock: bool(s.showOutOfStock, DEFAULT_SETTINGS.showOutOfStock),
     minChars: num(s.minChars, DEFAULT_SETTINGS.minChars, 1, 4),
     maxSuggestions: num(s.maxSuggestions, DEFAULT_SETTINGS.maxSuggestions, 3, 12),
@@ -71,20 +82,73 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     resultsPerPage: num(s.resultsPerPage, DEFAULT_SETTINGS.resultsPerPage, 12, 48),
     gridColumns: num(s.gridColumns, DEFAULT_SETTINGS.gridColumns, 2, 5),
     showVendor: bool(s.showVendor, DEFAULT_SETTINGS.showVendor),
-    accentColor: str(s.accentColor, DEFAULT_SETTINGS.accentColor),
-    backgroundColor: str(s.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
-    textColor: str(s.textColor, DEFAULT_SETTINGS.textColor),
-    highlightColor: str(s.highlightColor, DEFAULT_SETTINGS.highlightColor),
+    quickAdd: bool(s.quickAdd, DEFAULT_SETTINGS.quickAdd),
+    accentColor: color(s.accentColor, DEFAULT_SETTINGS.accentColor),
+    backgroundColor: color(s.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
+    textColor: color(s.textColor, DEFAULT_SETTINGS.textColor),
+    highlightColor: color(s.highlightColor, DEFAULT_SETTINGS.highlightColor),
     fontSize: num(s.fontSize, DEFAULT_SETTINGS.fontSize, 12, 22),
-    fontWeight: str(s.fontWeight, DEFAULT_SETTINGS.fontWeight),
+    fontWeight: oneOf(String(s.fontWeight), ["300", "400", "500", "600", "700"], DEFAULT_SETTINGS.fontWeight),
+    swatches: swatchMap(s.swatches),
   };
 }
 
+/**
+ * Apply a partial update on top of what is already stored.
+ *
+ * The Settings form only renders a subset of these fields. Rebuilding the whole
+ * object from the form alone silently reset every setting the form does not
+ * include (resultsPerPage, gridColumns, showVendor, recentSearches,
+ * collectionFilters) back to its default on every save.
+ */
+export function mergeSettings(
+  stored: unknown,
+  patch: Partial<Record<keyof WidgetSettings, unknown>>,
+): WidgetSettings {
+  const current = resolveSettings(stored);
+  const defined: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined && value !== null) defined[key] = value;
+  }
+  return resolveSettings({ ...current, ...defined });
+}
+
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
-const str = (v: unknown, d: string) => (typeof v === "string" && v ? v : d);
 const num = (v: unknown, d: number, min: number, max: number) => {
   const n = typeof v === "number" ? v : parseInt(String(v), 10);
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : d;
 };
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], d: T): T =>
   allowed.includes(v as T) ? (v as T) : d;
+
+/**
+ * Colours are injected straight into a CSS custom property on the storefront, so
+ * only accept shapes that cannot escape the declaration. Anything else falls back
+ * to the default rather than becoming a style-injection vector.
+ */
+const COLOR_RE =
+  /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|hsla?\([\d\s.,%]+\)|[a-z]{3,20})$/i;
+const color = (v: unknown, d: string) => {
+  const s = typeof v === "string" ? v.trim() : "";
+  return s && COLOR_RE.test(s) ? s : d;
+};
+
+/** Merchant-defined swatches: option value -> colour or image URL. */
+function swatchMap(v: unknown): Record<string, string> {
+  if (!v || typeof v !== "object") return {};
+  const out: Record<string, string> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(v as Record<string, unknown>)) {
+    if (count >= 300) break;
+    if (typeof value !== "string") continue;
+    const k = key.trim().toLowerCase();
+    const val = value.trim();
+    if (!k || !val) continue;
+    // Either a safe colour token or an https image URL — nothing else reaches CSS.
+    const ok = COLOR_RE.test(val) || /^https:\/\/[^\s'"()]+$/i.test(val);
+    if (!ok) continue;
+    out[k] = val;
+    count++;
+  }
+  return out;
+}

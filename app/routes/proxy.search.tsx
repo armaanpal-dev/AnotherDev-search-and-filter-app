@@ -31,6 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Merchant toggles were previously stored but never reached the engine.
     includeUnavailable: settings.showOutOfStock,
     typoTolerance: settings.typoTolerance,
+    semantic: settings.semanticSearch,
   });
 
   // Fire-and-forget analytics. Only a genuinely NEW search is counted: paging,

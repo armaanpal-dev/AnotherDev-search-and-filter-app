@@ -71,7 +71,33 @@ fly deploy
 (No need to touch Shopify unless you change scopes, webhooks, the app proxy, or the
 extension — those still go through `shopify app deploy`.)
 
+## After a schema change
+
+The release command runs `prisma migrate deploy`, but it does NOT rebuild the raw
+SQL layer (the generated tsvector column, trigram/GIN indexes, pgvector column) —
+Prisma cannot model those. Run it once after deploying a migration that touches
+indexed columns:
+```bash
+fly ssh console -C "npm run db:index"
+```
+
 ## Notes
+- **Scopes are unchanged and read-only**, so existing merchants are not prompted
+  to re-approve the app after this deploy.
+- **Analytics stops at add-to-cart.** Checkout runs on Shopify's domain, so
+  measuring completed orders would need a Web Pixel extension and the
+  `read_customer_events` + `write_pixels` scopes — deliberately not part of this
+  app. Click-through and add-to-cart are both attributed to the exact search.
+- **Sync runs in the web process.** It is guarded against concurrent runs and
+  recovers from a crash mid-run (a heartbeat marks a stale run dead after 3
+  minutes), but a deploy during a sync interrupts it — re-run it from the Index
+  page afterwards. If catalogs grow large enough for this to hurt, `runFullSync`
+  is already standalone and moving it behind a queue is a contained change.
+- **Semantic search** needs pgvector. Supabase ships it; enable the extension,
+  then run `npm run db:index`. Without it the migration skips the vector column
+  and search stays keyword-only — no errors, no configuration needed.
+- `min_machines_running = 1` keeps storefront search off cold starts. Don't set it
+  to 0 — a cold start in front of an autocomplete request is very visible.
 - The DB (Supabase) and its search index already exist, so the release step is a
   no-op migrate. For a brand-new database, run `npm run db:setup` once against it first.
 - Logs: `fly logs`. Status: `fly status`. Open: `fly open`.

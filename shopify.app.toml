@@ -7,7 +7,7 @@ application_url = "https://example.com"
 embedded = true
 
 [access_scopes]
-# Read-only: we mirror the catalog into our own index; we never write to the store.
+# Read-only: we mirror the catalog into our own index, and never write to the store.
 scopes = "read_products,read_product_listings,read_collection_listings,read_inventory,read_content"
 optional_scopes = [ ]
 use_legacy_install_flow = false
@@ -26,6 +26,12 @@ api_version = "2025-10"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
+  # Keeps Shop.planName honest between admin visits, so storefront Pro gating
+  # reacts to a cancelled or upgraded subscription immediately.
+  [[webhooks.subscriptions]]
+  topics = [ "app_subscriptions/update" ]
+  uri = "/webhooks/app/subscriptions_update"
+
   [[webhooks.subscriptions]]
   topics = [ "products/create" ]
   uri = "/webhooks/products/upsert"
@@ -38,9 +44,15 @@ api_version = "2025-10"
   topics = [ "products/delete" ]
   uri = "/webhooks/products/delete"
 
+  # Collection topics get their own handler: the product handler ignored them,
+  # so membership changes never reached the index.
   [[webhooks.subscriptions]]
-  topics = [ "collections/update" ]
-  uri = "/webhooks/products/upsert"
+  topics = [ "collections/create", "collections/update" ]
+  uri = "/webhooks/collections/upsert"
+
+  [[webhooks.subscriptions]]
+  topics = [ "collections/delete" ]
+  uri = "/webhooks/collections/delete"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/data_request"

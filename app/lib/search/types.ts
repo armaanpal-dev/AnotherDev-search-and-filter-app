@@ -36,6 +36,8 @@ export interface SearchQuery {
   includeUnavailable?: boolean;
   // Merchant toggle: when false, fuzzy/trigram matching is skipped (exact only).
   typoTolerance?: boolean;
+  // Merchant toggle: blend pgvector similarity into ranking (Pro + configured).
+  semantic?: boolean;
 }
 
 export interface ProductHit {
@@ -56,12 +58,18 @@ export interface ProductHit {
   pinned: boolean;
   // Short description, included in autocomplete for the hover-preview pane.
   description?: string;
+  // First variant id — lets the storefront offer add-to-cart straight from the
+  // results grid for single-variant products.
+  variantId?: string | null;
+  variantCount?: number;
 }
 
 export interface FacetValue {
   value: string;
   label: string;
   count: number;
+  // Optional swatch colour/image resolved from the merchant's swatch map.
+  swatch?: string;
 }
 
 export interface Facet {
@@ -85,7 +93,7 @@ export interface SearchResult {
   // "did you mean" suggestion when results are thin.
   suggestion?: string;
   // Debug/telemetry: which strategy produced the hits.
-  strategy: "fulltext" | "fuzzy" | "hybrid" | "browse";
+  strategy: "fulltext" | "fuzzy" | "hybrid" | "browse" | "sku" | "semantic";
   tookMs: number;
 }
 
@@ -119,7 +127,21 @@ export interface AutocompleteResult {
   redirect?: string;
 }
 
+/** Product recommendations — same index, different surface (PDP, cart, empty search). */
+export type RecommendationKind = "related" | "trending" | "bestsellers" | "recent";
+
+export interface RecommendationQuery {
+  shopId: string;
+  kind: RecommendationKind;
+  // Anchor product for "related" (Shopify product id, numeric part).
+  productId?: string;
+  collection?: string;
+  limit: number;
+  includeUnavailable?: boolean;
+}
+
 export interface SearchEngine {
   search(query: SearchQuery): Promise<SearchResult>;
   autocomplete(query: AutocompleteQuery): Promise<AutocompleteResult>;
+  recommend(query: RecommendationQuery): Promise<ProductHit[]>;
 }

@@ -40,7 +40,7 @@ const FEATURES = [
   { href: "/app/merchandising", title: "Merchandising", icon: "📌", what: "Pin, boost, bury or hide products for specific searches, and set redirects.", why: "Control what shows first — promote new arrivals, push overstock, hide out-of-season items.", pro: true },
   { href: "/app/analytics", title: "Analytics", icon: "📊", what: "See top searches, zero-result searches, click-through and conversion rates.", why: "Tells you exactly what shoppers want — and where search is failing them." },
   { href: "/app/plans", title: "Plans", icon: "💳", what: "Free covers up to 100 products; Pro unlocks unlimited + merchandising.", why: "Upgrade only when you outgrow Free." },
-  { href: "/app/settings", title: "Settings", icon: "⚙️", what: "Toggle instant search, typo tolerance, out-of-stock visibility, and accent color.", why: "Fine-tune behaviour and match the widget to your brand." },
+  { href: "/app/settings", title: "Settings", icon: "⚙️", what: "Toggle instant search, search-page takeover, collection filters, typo tolerance, quick add-to-cart, colours and swatches.", why: "Fine-tune behaviour and match the widget to your brand — everything lives here, not in the theme editor." },
 ];
 
 export default function Dashboard() {
@@ -83,13 +83,17 @@ export default function Dashboard() {
           <s-list-item>
             <s-text type="strong">Turn the app on in your theme.</s-text>{" "}
             In your store: <s-text type="strong">Online Store → Themes → Customize → App embeds</s-text>,
-            then enable <s-text type="strong">AnotherDev Search</s-text>. This activates the search on your storefront.
+            then enable <s-text type="strong">AnotherDev Search</s-text>. That one switch upgrades
+            your existing search box, replaces your search page with faceted results, and adds
+            filters to collection pages — no blocks to place.
           </s-list-item>
           <s-list-item>
-            <s-text type="strong">Add the search widgets where you want them.</s-text>{" "}
+            <s-text type="strong">Optional: place blocks where you want them.</s-text>{" "}
             In the theme editor click <s-text type="strong">Add section / Add block</s-text> and choose{" "}
-            <s-text type="strong">AnotherDev Search Bar</s-text> (for your header) and{" "}
-            <s-text type="strong">AnotherDev Search Results</s-text> (on your Search page).
+            <s-text type="strong">AnotherDev Search Bar</s-text>,{" "}
+            <s-text type="strong">AnotherDev Search Results</s-text>, or{" "}
+            <s-text type="strong">AnotherDev Recommendations</s-text> (a “you may also like” rail
+            for product pages). A block you place always wins over the automatic version.
           </s-list-item>
         </s-ordered-list>
       </s-section>

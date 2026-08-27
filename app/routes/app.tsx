@@ -6,6 +6,7 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 import { ensureShop } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
+import { invalidateShopConfig } from "../lib/search/config.server";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -14,10 +15,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = await ensureShop(session.shop);
 
   // Keep the stored plan in sync so the storefront (App Proxy) can gate Pro
-  // features without a billing round-trip.
+  // features without a billing round-trip. The app_subscriptions/update webhook
+  // handles changes between visits; this covers the first visit and any webhook
+  // that was missed.
   const { plan } = await getPlanStatus(billing);
   if (shop.planName !== plan) {
     await prisma.shop.update({ where: { id: shop.id }, data: { planName: plan } });
+    invalidateShopConfig(shop.id);
   }
 
   // eslint-disable-next-line no-undef

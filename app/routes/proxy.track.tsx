@@ -1,17 +1,22 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain } from "../lib/shop.server";
 import { normalizeQuery } from "../lib/search/normalize";
-import { jsonCors } from "../lib/proxy.server";
+import { jsonCors, clientKey } from "../lib/proxy.server";
+import { RateLimiter } from "../lib/cache.server";
 
 // POST apps/anotherdev-search/track
-//   { type: "click" | "add_to_cart" | "purchase", query, productId, st }
+//   { type: "click" | "add_to_cart", query, productId, st }
 //
-// CRO analytics beacon: attributes clicks, add-to-carts and purchases back to
-// the search that produced them, so the admin can report CTR and search-driven
-// conversion. Also feeds the `popularity` signal that powers the "Most popular"
-// sort and the relevance tie-break.
+// CRO analytics beacon: attributes clicks and add-to-carts back to the search
+// that produced them, so the admin can report click-through and add-to-cart
+// rates. Also feeds the `popularity` signal that powers the "Most popular" sort
+// and the relevance tie-break.
+//
+// Add-to-cart is the last event the storefront can observe. Checkout runs on
+// Shopify's own domain, so measuring actual purchases would need a Web Pixel
+// extension (and the scopes to install one) — deliberately not part of this app.
 
 // How long after a search an action still counts as attributable to it.
 const ATTRIBUTION_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -20,12 +25,25 @@ const ATTRIBUTION_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 const POPULARITY_WEIGHT: Record<string, number> = {
   click: 1,
   add_to_cart: 5,
-  purchase: 12,
 };
+
+/**
+ * This endpoint accepts writes from anonymous storefront visitors, so it needs a
+ * ceiling. Without one, a loop hitting `/track` inflates a product's popularity
+ * (which feeds ranking and the "Most popular" sort) and writes to the database
+ * as fast as the network allows.
+ *
+ * 60 events / minute / shopper is far above real browsing and far below abuse.
+ */
+const limiter = new RateLimiter(60, 60_000);
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session } = await authenticate.public.appProxy(request);
   if (!session) return jsonCors({ ok: false }, 401);
+
+  if (!limiter.allow(clientKey(request, session.shop))) {
+    return jsonCors({ ok: false, error: "rate_limited" }, 429);
+  }
 
   const shop = await getShopByDomain(session.shop);
   if (!shop) return jsonCors({ ok: false }, 404);
@@ -40,15 +58,16 @@ export async function action({ request }: ActionFunctionArgs) {
   const type = String(payload.type ?? "");
   if (!POPULARITY_WEIGHT[type]) return jsonCors({ ok: true });
 
-  const productId = String(payload.productId ?? "").trim() || null;
-  const sessionToken = String(payload.st ?? "").trim();
+  const sessionToken = String(payload.st ?? "").trim().slice(0, 64);
   const normalized = normalizeQuery(String(payload.query ?? ""));
   const since = new Date(Date.now() - ATTRIBUTION_WINDOW_MS);
+
+  const productId = String(payload.productId ?? "").trim() || null;
 
   // Attribution requires a shopper session. Without one we cannot tell whose
   // search this action belongs to, and the previous code fell back to updating
   // EVERY event that shared the query string — which marked unrelated shoppers'
-  // searches as converted and made the reported conversion rate meaningless.
+  // searches as converted and made the reported rate meaningless.
   if (sessionToken) {
     const target = await prisma.searchEvent.findFirst({
       where: {
@@ -56,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
         sessionToken,
         createdAt: { gte: since },
         // A click belongs to the specific search it came from; an add-to-cart
-        // or purchase attaches to whatever this shopper searched most recently.
+        // attaches to whatever this shopper searched most recently.
         ...(type === "click" && normalized ? { normalized } : {}),
       },
       orderBy: { createdAt: "desc" },
@@ -70,14 +89,16 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(productId && !target.clickedProductId
             ? { clickedProductId: productId }
             : {}),
+          // `converted` records "this search led to an add to cart" — the
+          // furthest down the funnel the storefront can see.
           ...(type === "click" ? {} : { converted: true }),
         },
       });
     }
   }
 
-  // Popularity is behavioural: what shoppers actually click and buy out of
-  // search results. It drives the "Most popular" sort and the relevance
+  // Popularity is behavioural: what shoppers actually click and add to cart out
+  // of search results. It drives the "Most popular" sort and the relevance
   // tie-break, both of which ranked every product equally before this existed.
   if (productId) {
     await prisma.product
@@ -91,6 +112,6 @@ export async function action({ request }: ActionFunctionArgs) {
   return jsonCors({ ok: true });
 }
 
-export async function loader(_: LoaderFunctionArgs) {
+export async function loader() {
   return jsonCors({ ok: true });
 }

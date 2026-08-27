@@ -47,14 +47,18 @@ const FREE_FEATURES = [
   "Typo tolerance & synonyms",
   "Faceted filters (price, brand, type, color, size)",
   "Basic analytics (7 days)",
+  "SKU and variant search",
+  "Product recommendation rails",
 ];
 const PRO_FEATURES = [
   "Unlimited products",
   "Everything in Free, plus:",
   "Merchandising rules (pin / boost / hide)",
   "Search redirects",
-  "Full analytics (90 days) + conversion tracking",
+  "Full analytics (90 days) + add-to-cart attribution",
   "AI feed for shopping agents (AIO)",
+  "Semantic search — understands meaning, not just keywords",
+  "Rule-based merchandising (boost anything tagged X)",
   "Priority catalog sync",
 ];
 

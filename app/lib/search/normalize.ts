@@ -11,6 +11,9 @@
 export function normalizeQuery(raw: string): string {
   return foldAccents(String(raw ?? ""))
     .toLowerCase()
+    // Matching control characters is the entire point: a pasted query can carry
+    // NULs and newlines that would otherwise reach the tsquery parser.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\0-\x1f\x7f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -25,9 +28,42 @@ export function foldAccents(s: string): string {
  * Escape the LIKE wildcards `%` and `_` (and the escape char itself) so a
  * shopper typing "50%" searches for the literal string instead of matching the
  * entire catalog. Pair with `ESCAPE '\'` in SQL.
+ *
+ * The replacement must be a literal backslash followed by `$&`. Writing "\$&"
+ * collapses to "$&" when JS parses the string literal, which substitutes the
+ * match back unchanged — i.e. no escaping happened at all, and a search for "%"
+ * matched the entire catalog.
  */
 export function escapeLike(s: string): string {
-  return s.replace(/[\%_]/g, "\$&");
+  return s.replace(/[\\%_]/g, "\\$&");
+}
+
+/**
+ * Neutralise Liquid markup in any value interpolated into an App Proxy response.
+ * Shopify renders those responses THROUGH Liquid in the merchant's theme
+ * context, so an unescaped `{{ ... }}` in a search term or a product title is
+ * executed server-side. HTML-escaping does not help: `{` and `%` are not
+ * HTML-special. A zero-width space inside each delimiter breaks the token while
+ * staying invisible to the shopper.
+ */
+export function stripLiquid(s: string): string {
+  return String(s ?? "")
+    .replace(/\{\{/g, "{​{")
+    .replace(/\}\}/g, "}​}")
+    .replace(/\{%/g, "{​%")
+    .replace(/%\}/g, "%​}");
+}
+
+/**
+ * Does this look like a SKU / product code rather than prose? Codes are short,
+ * unspaced, and mix letters with digits or separators ("TSH-RED-M", "AB12345").
+ * Drives the exact-SKU branch of the query, which outranks everything else.
+ */
+export function looksLikeSku(term: string): boolean {
+  const t = term.trim();
+  if (t.length < 3 || t.length > 64) return false;
+  if (/\s/.test(t)) return false;
+  return /\d/.test(t) && /^[\p{L}\p{N}._/-]+$/u.test(t);
 }
 
 /** Tokenise into words for prefix/fuzzy handling. */
@@ -60,10 +96,17 @@ function phraseInQuery(
 }
 
 /**
+ * Cap on how many phrases reach the tsquery. Every expansion becomes another OR
+ * group, and a merchant with hundreds of synonym rules could otherwise build a
+ * query the planner cannot execute quickly.
+ */
+export const MAX_EXPANSIONS = 12;
+
+/**
  * Expand a query with merchant synonyms.
  * - multiway: if any listed term appears, all listed terms are OR-added.
  * - oneway:   if `input` appears, `terms` are OR-added (but not vice-versa).
- * Returns the ORIGINAL query plus any expansion terms, de-duplicated.
+ * Returns the ORIGINAL query plus any expansion terms, de-duplicated and capped.
  */
 export function expandSynonyms(term: string, rules: SynonymRule[]): string[] {
   const normalized = normalizeQuery(term);
@@ -71,6 +114,7 @@ export function expandSynonyms(term: string, rules: SynonymRule[]): string[] {
   const expansions = new Set<string>([normalized]);
 
   for (const rule of rules) {
+    if (expansions.size >= MAX_EXPANSIONS) break;
     if (rule.type === "oneway") {
       if (rule.input && phraseInQuery(rule.input, normalized, words)) {
         rule.terms.forEach((t) => expansions.add(normalizeQuery(t)));
@@ -81,7 +125,7 @@ export function expandSynonyms(term: string, rules: SynonymRule[]): string[] {
     }
   }
 
-  return [...expansions].filter(Boolean);
+  return [...expansions].filter(Boolean).slice(0, MAX_EXPANSIONS);
 }
 
 /**

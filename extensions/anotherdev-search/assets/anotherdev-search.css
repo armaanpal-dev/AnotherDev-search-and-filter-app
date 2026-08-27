@@ -162,3 +162,103 @@ body.adsf-active .predictive-search__results { display: none !important; }
   .adsf-facets.is-open { transform: translateX(0); }
   .adsf-facets__inner { position: static; }
 }
+
+/* ============================================================
+   v2 additions: chips, skeletons, collapsible facets, price
+   slider, quick add, recommendation rail, link pagination.
+   ============================================================ */
+
+/* ---- Applied-filter chips ---- */
+.adsf-app__chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1rem; }
+.adsf-app__chips:empty { margin: 0; }
+.adsf-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.65rem; font-size: 0.82rem; line-height: 1;
+  border: 1px solid #dcdcdc; border-radius: 999px; background: #fff;
+  cursor: pointer; color: inherit;
+}
+.adsf-chip:hover { border-color: var(--adsf-accent, #111); }
+.adsf-chip--clear { border-style: dashed; color: #666; }
+
+/* ---- Collapsible facet headers ---- */
+.adsf-facet__toggle {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  background: none; border: 0; padding: 0; font: inherit; font-weight: 600;
+  cursor: pointer; color: inherit; text-align: left;
+}
+.adsf-facet__toggle::after {
+  content: ""; width: 8px; height: 8px; margin-left: 0.5rem; flex: none;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px); transition: transform .18s ease;
+}
+.adsf-facet__toggle[aria-expanded="false"]::after { transform: rotate(-45deg) translateY(0); }
+.adsf-facet__body { margin-top: 0.6rem; }
+
+/* ---- Price range ---- */
+.adsf-facet__rangerow { display: flex; align-items: center; gap: 0.4rem; }
+.adsf-facet__slider { width: 100%; margin-top: 0.6rem; accent-color: var(--adsf-accent, #111); }
+
+/* ---- Loading skeletons ----
+   Reserving the real card shape keeps the grid from jumping when results land. */
+.adsf-card--skeleton { pointer-events: none; }
+.adsf-skel {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e6e6e6 37%, #f0f0f0 63%);
+  background-size: 400% 100%; animation: adsf-shimmer 1.3s ease infinite; border-radius: 8px;
+}
+.adsf-skel--img { width: 100%; aspect-ratio: 1/1; }
+.adsf-skel--line { height: 12px; margin-top: 0.55rem; }
+.adsf-skel--short { width: 45%; }
+@keyframes adsf-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) {
+  .adsf-skel { animation: none; }
+  .adsf-facets { transition: none; }
+}
+
+/* ---- Quick add to cart ---- */
+.adsf-card__add {
+  width: 100%; margin-top: 0.5rem; padding: 0.5rem 0.75rem;
+  border: 1px solid var(--adsf-accent, #111); border-radius: 8px;
+  background: #fff; color: var(--adsf-accent, #111);
+  font: inherit; font-size: 0.85rem; cursor: pointer;
+}
+.adsf-card__add:hover:not(:disabled) { background: var(--adsf-accent, #111); color: #fff; }
+.adsf-card__add:disabled { opacity: 0.65; cursor: default; }
+.adsf-card__vendor { font-size: 0.78rem; opacity: 0.7; margin-bottom: 0.15rem; }
+.adsf-dropdown__pvendor { font-size: 0.75rem; opacity: 0.65; }
+
+/* ---- Pagination is now links, not buttons ---- */
+.adsf-pagination a {
+  padding: 0.4rem 0.7rem; border: 1px solid #ddd; border-radius: 6px;
+  background: #fff; cursor: pointer; text-decoration: none; color: inherit;
+}
+.adsf-pagination a[aria-current="page"] {
+  background: var(--adsf-accent, #111); color: #fff; border-color: var(--adsf-accent, #111);
+}
+
+/* ---- Recommendation rail ---- */
+.adsf-rec { margin: 2.5rem 0; }
+.adsf-rec__heading { font-size: 1.1rem; margin: 0 0 1rem; }
+.adsf-rec__track {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr);
+  gap: 1rem; overflow-x: auto; scroll-snap-type: x proximity;
+  padding-bottom: 0.5rem; -webkit-overflow-scrolling: touch;
+}
+.adsf-rec__card { scroll-snap-align: start; text-decoration: none; color: inherit; }
+.adsf-rec__card img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 10px; background: #f2f2f2; }
+.adsf-rec__title { display: block; margin-top: 0.45rem; font-size: 0.88rem; line-height: 1.3; }
+.adsf-rec__price { display: block; font-weight: 600; font-size: 0.88rem; }
+
+/* ---- Focus visibility (keyboard users must be able to see where they are) ---- */
+.adsf-dropdown [role="option"]:focus-visible,
+.adsf-chip:focus-visible,
+.adsf-card__add:focus-visible,
+.adsf-facet__toggle:focus-visible,
+.adsf-pagination a:focus-visible {
+  outline: 2px solid var(--adsf-accent, #111); outline-offset: 2px;
+}
+.adsf-dropdown [role="option"].is-active { background: rgba(0, 0, 0, 0.055); }
+
+.adsf-visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}

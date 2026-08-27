@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import { getSearchEngine } from "../lib/search/index.server";
 import { getShopByDomain } from "../lib/shop.server";
 import { parseSearchParams, jsonCors } from "../lib/proxy.server";
+import { resolveSettings } from "../lib/settings";
 import type { SortKey, FilterSelection } from "../lib/search/types";
 
 // GET apps/anotherdev-search/ai?q=...
@@ -25,6 +26,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { term, page, perPage, sort, filters, price, collection } =
     parseSearchParams(url.searchParams);
 
+  const settings = resolveSettings(shop.settings);
   const result = await getSearchEngine().search({
     shopId: shop.id,
     term,
@@ -34,6 +36,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     filters: filters as FilterSelection,
     price,
     collection,
+    // Agents must see the same catalog shoppers do, or they recommend products
+    // that are hidden, unpublished or out of stock on the storefront.
+    includeUnavailable: settings.showOutOfStock,
+    typoTolerance: settings.typoTolerance,
+    semantic: settings.semanticSearch,
   });
 
   const base = `https://${session.shop}`;

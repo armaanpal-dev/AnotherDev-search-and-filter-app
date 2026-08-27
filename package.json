@@ -14,8 +14,8 @@
     "setup": "prisma generate && prisma migrate deploy && npm run db:index",
     "postinstall": "node scripts/patch-shopify-types.mjs",
     "db:index": "node scripts/apply-search-index.mjs",
-    "db:setup": "prisma migrate dev --name init && npm run db:index",
-    "test": "node --test test/normalize.test.mjs",
+    "db:setup": "prisma migrate dev && npm run db:index",
+    "test": "node --test test/normalize.test.mjs test/normalize-product.test.mjs test/settings.test.mjs",
     "test:integration": "node test/integration.search.mjs",
     "test:edge": "node test/edgecases.search.mjs",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
@@ -23,7 +23,8 @@
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "typecheck": "react-router typegen && tsc --noEmit"
+    "typecheck": "react-router typegen && tsc --noEmit",
+    "test:all": "npm test && npm run test:integration && npm run test:edge"
   },
   "type": "module",
   "engines": {
@@ -54,6 +55,7 @@
     "@types/react-dom": "^18.3.7",
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
+    "esbuild": "^0.28.2",
     "eslint": "^8.57.1",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import": "^2.32.0",

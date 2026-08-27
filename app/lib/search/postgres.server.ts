@@ -1,26 +1,39 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
-import { getShopConfig } from "./config.server";
+import { getShopConfig, facetCache, type MerchCondition, type MerchRule } from "./config.server";
 import {
   normalizeQuery,
   expandSynonyms,
   toTsQuery,
   escapeLike,
   tokenize,
+  looksLikeSku,
 } from "./normalize";
+import { embedQuery, semanticReady, toVectorLiteral } from "./embeddings.server";
 import type {
   SearchEngine,
   SearchQuery,
   SearchResult,
   ProductHit,
   Facet,
+  FacetValue,
   AutocompleteQuery,
   AutocompleteResult,
   FilterSelection,
   SortKey,
+  RecommendationQuery,
 } from "./types";
 
 const FUZZY_THRESHOLD = 0.2; // pg_trgm similarity floor for typo tolerance
+
+// Cosine DISTANCE ceiling for a semantic match. pgvector's <=> returns 0 for
+// identical and 2 for opposite; anything past this is noise, not a near-miss.
+const SEMANTIC_MAX_DISTANCE = 0.62;
+
+// OFFSET makes Postgres materialise and discard every skipped row, so a crawler
+// walking to page 100000 turns one request into a full-table scan. Real shoppers
+// never go past a handful of pages; bots are what find this.
+const MAX_PAGE = 200;
 
 // unaccent+lower helper mirrored from the SQL migration, for parameter comparisons.
 const uaLower = (col: Prisma.Sql) =>
@@ -36,11 +49,18 @@ const like = (col: Prisma.Sql, pattern: string) =>
   Prisma.sql`${col} LIKE ${pattern} ${ESC}`;
 
 // The columns every product-hit query selects. Kept in one place so the row
-// shape and `rowToHit` can never drift apart.
+// shape and `rowToHit` can never drift apart. The variant subqueries let the
+// storefront offer add-to-cart directly from a result card for single-variant
+// products (and know to send multi-variant products to the PDP instead).
 const HIT_COLUMNS = Prisma.sql`
   p."productId", p."handle", p."title", p."vendor", p."productType",
   p."priceMin", p."priceMax", p."currencyCode", p."imageUrl", p."imageAlt",
-  p."available", p."tags", p."options"`;
+  p."available", p."tags", p."options",
+  (SELECT v."variantId" FROM "ProductVariant" v
+    WHERE v."productId" = p."id"
+    ORDER BY v."available" DESC, v."id" ASC LIMIT 1) AS "variantId",
+  (SELECT COUNT(*)::int FROM "ProductVariant" v
+    WHERE v."productId" = p."id") AS "variantCount"`;
 
 function rowToHit(r: any, extra: Partial<ProductHit> = {}): ProductHit {
   return {
@@ -59,6 +79,8 @@ function rowToHit(r: any, extra: Partial<ProductHit> = {}): ProductHit {
     options: (r.options as Record<string, string[]>) ?? {},
     score: Number(r.score ?? 0),
     pinned: false,
+    variantId: r.variantId ?? null,
+    variantCount: Number(r.variantCount ?? 0),
     ...(r.description != null ? { description: r.description } : {}),
     ...extra,
   };
@@ -124,30 +146,108 @@ function buildFilterPredicates(
   return preds;
 }
 
+/**
+ * Turn one merchandising condition into a SQL predicate over a product row.
+ * This is what lets a merchant say "bury anything tagged clearance" instead of
+ * pasting a list of product ids that goes stale the moment the catalog changes.
+ */
+function conditionPredicate(c: MerchCondition): Prisma.Sql | null {
+  const v = c.value;
+  const contains = c.op === "contains";
+  let pred: Prisma.Sql | null = null;
+
+  if (c.field === "tag") {
+    pred = contains
+      ? Prisma.sql`EXISTS (SELECT 1 FROM unnest(p."tags") t WHERE lower(t) LIKE ${"%" + escapeLike(v.toLowerCase()) + "%"} ${ESC})`
+      : Prisma.sql`p."tags" && ARRAY[${v}]::text[]`;
+  } else if (c.field === "vendor" || c.field === "productType") {
+    const col =
+      c.field === "vendor" ? Prisma.sql`p."vendor"` : Prisma.sql`p."productType"`;
+    pred = contains
+      ? Prisma.sql`lower(${col}) LIKE ${"%" + escapeLike(v.toLowerCase()) + "%"} ${ESC}`
+      : Prisma.sql`${col} = ${v}`;
+  } else if (c.field === "collection") {
+    pred = Prisma.sql`p."collections" && ARRAY[${v}]::text[]`;
+  } else if (c.field === "available") {
+    pred = Prisma.sql`p."available" = ${v === "true"}`;
+  } else if (c.field.startsWith("option:")) {
+    const opt = c.field.slice("option:".length);
+    pred = Prisma.sql`(p."options" -> ${opt}) ? ${v}`;
+  } else if (c.field.startsWith("metafield:")) {
+    const key = c.field.slice("metafield:".length);
+    pred = contains
+      ? Prisma.sql`lower(coalesce(p."metafields" ->> ${key}, '')) LIKE ${"%" + escapeLike(v.toLowerCase()) + "%"} ${ESC}`
+      : Prisma.sql`(p."metafields" ->> ${key}) = ${v}`;
+  }
+
+  if (!pred) return null;
+  return c.op === "neq" ? Prisma.sql`NOT (${pred})` : pred;
+}
+
+/** Score contribution from every boost/bury/pin condition on the active rule. */
+function conditionScoreExpr(rule: MerchRule | null): Prisma.Sql {
+  if (!rule || !rule.conditions.length) return Prisma.sql`0::float`;
+  let expr = Prisma.sql`0::float`;
+  for (const c of rule.conditions) {
+    if (c.action === "hide") continue; // handled as a hard predicate
+    const pred = conditionPredicate(c);
+    if (!pred) continue;
+    // A conditional "pin" cannot literally prepend an unbounded set without
+    // breaking pagination, so it becomes a boost large enough to clear the
+    // organic score range instead.
+    const weight = c.action === "bury" ? -c.weight : c.action === "pin" ? c.weight + 50 : c.weight;
+    expr = Prisma.sql`${expr} + (CASE WHEN ${pred} THEN ${weight}::float ELSE 0 END)`;
+  }
+  return expr;
+}
+
+/** Hard exclusions from every `hide` condition on the active rule. */
+function conditionHidePredicates(rule: MerchRule | null): Prisma.Sql[] {
+  if (!rule) return [];
+  const out: Prisma.Sql[] = [];
+  for (const c of rule.conditions) {
+    if (c.action !== "hide") continue;
+    const pred = conditionPredicate(c);
+    if (pred) out.push(Prisma.sql`NOT (${pred})`);
+  }
+  return out;
+}
+
 function combine(preds: Prisma.Sql[]): Prisma.Sql {
   if (preds.length === 0) return Prisma.sql`TRUE`;
   return Prisma.join(preds, " AND ");
 }
 
+/**
+ * Every ordering ends with a unique tiebreaker.
+ *
+ * Postgres makes no ordering guarantee between rows that compare equal, and it
+ * is free to pick a different plan for the LIMIT/OFFSET of page 2 than it did
+ * for page 1. On a catalog where the sort key ties — a fresh index where every
+ * `popularity` is 0, or a price sort with many identical prices — that means a
+ * shopper can see the same product on two pages and never see another at all.
+ */
+const STABLE = Prisma.sql`p."id" ASC`;
+
 function orderByClause(sort: SortKey, hasTerm: boolean): Prisma.Sql {
   switch (sort) {
     case "price_asc":
-      return Prisma.sql`p."priceMin" ASC`;
+      return Prisma.sql`p."priceMin" ASC, ${STABLE}`;
     case "price_desc":
-      return Prisma.sql`p."priceMax" DESC`;
+      return Prisma.sql`p."priceMax" DESC, ${STABLE}`;
     case "title_asc":
-      return Prisma.sql`p."title" ASC`;
+      return Prisma.sql`p."title" ASC, ${STABLE}`;
     case "title_desc":
-      return Prisma.sql`p."title" DESC`;
+      return Prisma.sql`p."title" DESC, ${STABLE}`;
     case "newest":
-      return Prisma.sql`p."publishedAt" DESC NULLS LAST`;
+      return Prisma.sql`p."publishedAt" DESC NULLS LAST, ${STABLE}`;
     case "bestselling":
-      return Prisma.sql`p."popularity" DESC, p."publishedAt" DESC NULLS LAST`;
+      return Prisma.sql`p."popularity" DESC, p."publishedAt" DESC NULLS LAST, ${STABLE}`;
     case "relevance":
     default:
       return hasTerm
-        ? Prisma.sql`score DESC, p."popularity" DESC`
-        : Prisma.sql`p."popularity" DESC, p."publishedAt" DESC NULLS LAST`;
+        ? Prisma.sql`score DESC, p."popularity" DESC, ${STABLE}`
+        : Prisma.sql`p."popularity" DESC, p."publishedAt" DESC NULLS LAST, ${STABLE}`;
   }
 }
 
@@ -157,6 +257,7 @@ export class PostgresSearchEngine implements SearchEngine {
     const cfg = await getShopConfig(q.shopId);
     const normalized = normalizeQuery(q.term);
     const fuzzy = q.typoTolerance !== false;
+    const page = Math.min(Math.max(1, q.page), MAX_PAGE);
 
     // 1. Redirects short-circuit everything.
     if (normalized) {
@@ -179,13 +280,18 @@ export class PostgresSearchEngine implements SearchEngine {
     const expansions = hasTerm ? expandSynonyms(normalized, cfg.synonyms) : [];
     const tsQueryStr = hasTerm ? toTsQuery(expansions) : "";
 
-    // 2. Base predicate: shop scope + status/availability.
+    // 2. Base predicate: shop scope + status/publication/availability.
     // `base` deliberately excludes the availability clause: the availability
     // FACET has to count the out-of-stock bucket, which it cannot do if
     // "available = TRUE" is baked into every predicate it composes.
+    //
+    // publishedOnline matters as much as status: an ACTIVE product that is not
+    // published to the Online Store channel has no storefront URL, so indexing
+    // it means shoppers click a search result and land on a 404.
     const base: Prisma.Sql[] = [
       Prisma.sql`p."shopId" = ${q.shopId}`,
       Prisma.sql`p."status" = 'ACTIVE'`,
+      Prisma.sql`p."publishedOnline" = TRUE`,
     ];
     const availPred: Prisma.Sql | null = q.includeUnavailable
       ? null
@@ -199,11 +305,13 @@ export class PostgresSearchEngine implements SearchEngine {
         Prisma.sql`p."productId" NOT IN (${Prisma.join(rule.hiddenProductIds)})`,
       );
     }
+    base.push(...conditionHidePredicates(rule));
+
     // Pins are prepended to page 1 only, so they may only be excluded from the
     // ORGANIC query on page 1. Excluding them on every page deleted them from
     // the catalog entirely from page 2 onwards.
     const pinsActive =
-      !!rule?.pinnedProductIds.length && q.sort === "relevance" && q.page === 1;
+      !!rule?.pinnedProductIds.length && q.sort === "relevance" && page === 1;
     const baseForPins = [...base];
     if (pinsActive) {
       base.push(
@@ -211,13 +319,19 @@ export class PostgresSearchEngine implements SearchEngine {
       );
     }
 
-    // 3. Text predicate (full-text OR fuzzy OR substring). Empty term => browse.
+    // 3. Text predicate (SKU OR full-text OR fuzzy OR substring OR semantic).
     let textPred = Prisma.sql`TRUE`;
-    let scoreExpr = Prisma.sql`0::float`;
+    let scoreExpr = conditionScoreExpr(rule);
     let strategy: SearchResult["strategy"] = "browse";
 
+    // Semantic is opt-in per shop, needs Pro, a provider and the pgvector column.
+    const wantSemantic =
+      hasTerm && q.semantic !== false && cfg.settings.semanticSearch && cfg.planName === "pro";
+    const queryVector =
+      wantSemantic && (await semanticReady()) ? await embedQuery(normalized) : null;
+
     if (hasTerm) {
-      strategy = fuzzy ? "hybrid" : "fulltext";
+      strategy = queryVector ? "semantic" : fuzzy ? "hybrid" : "fulltext";
       const tsq = Prisma.sql`websearch_to_tsquery('simple', ad_immutable_unaccent(${tsQueryStr}))`;
       const termParam = normalized;
       const esc = escapeLike(termParam);
@@ -227,15 +341,38 @@ export class PostgresSearchEngine implements SearchEngine {
         Prisma.sql`p."searchVector" @@ ${tsq}`,
         like(title, `%${esc}%`),
       ];
+
+      // Exact SKU: someone pasting a product code wants that product, full stop.
+      const skuMatch = looksLikeSku(termParam);
+      if (skuMatch) {
+        textParts.push(
+          Prisma.sql`EXISTS (SELECT 1 FROM unnest(p."skus") s WHERE lower(s) = ${termParam})`,
+        );
+        strategy = "sku";
+      }
+
       if (fuzzy) {
         textParts.push(
           Prisma.sql`similarity(${title}, ${termParam}) > ${FUZZY_THRESHOLD}`,
         );
       }
+
+      let semanticScore = Prisma.sql`0::float`;
+      if (queryVector) {
+        const vec = toVectorLiteral(queryVector);
+        textParts.push(
+          Prisma.sql`(p."embedding" IS NOT NULL AND (p."embedding" <=> ${vec}::vector) < ${SEMANTIC_MAX_DISTANCE})`,
+        );
+        // Distance -> similarity, weighted below exact lexical matching so a
+        // literal title match still beats a merely-related product.
+        semanticScore = Prisma.sql`(CASE WHEN p."embedding" IS NULL THEN 0
+          ELSE GREATEST(0, 1 - (p."embedding" <=> ${vec}::vector)) * 2.5 END)`;
+      }
+
       textPred = Prisma.sql`(${Prisma.join(textParts, " OR ")})`;
 
-      // Boost/bury from merchandising rule.
-      let boostExpr = Prisma.sql`0::float`;
+      // Boost/bury from explicit product-id lists on the merchandising rule.
+      let boostExpr = scoreExpr;
       if (rule) {
         if (rule.boostedProductIds.length)
           boostExpr = Prisma.sql`${boostExpr} + (CASE WHEN p."productId" IN (${Prisma.join(rule.boostedProductIds)}) THEN 5 ELSE 0 END)`;
@@ -245,12 +382,17 @@ export class PostgresSearchEngine implements SearchEngine {
       const simTerm = fuzzy
         ? Prisma.sql`similarity(${title}, ${termParam}) * 2.0`
         : Prisma.sql`0::float`;
+      const skuBonus = skuMatch
+        ? Prisma.sql`+ (CASE WHEN EXISTS (SELECT 1 FROM unnest(p."skus") s WHERE lower(s) = ${termParam}) THEN 50 ELSE 0 END)`
+        : Prisma.sql``;
 
       scoreExpr = Prisma.sql`(
         ts_rank_cd(p."searchVector", ${tsq}) * 4.0
         + ${simTerm}
+        + ${semanticScore}
         + (CASE WHEN ${title} LIKE ${esc + "%"} ${ESC} THEN 1.5 ELSE 0 END)
         + ln(1 + p."popularity") * 0.3
+        ${skuBonus}
         + ${boostExpr}
       )`;
     }
@@ -265,7 +407,7 @@ export class PostgresSearchEngine implements SearchEngine {
 
     // 5. Rows, total and every facet are independent queries. Run them
     //    concurrently rather than paying ~8 sequential round-trips per search.
-    const offset = (q.page - 1) * q.perPage;
+    const offset = (page - 1) * q.perPage;
     const order = orderByClause(q.sort, hasTerm);
 
     const rowsPromise = q.facetsOnly
@@ -282,12 +424,17 @@ export class PostgresSearchEngine implements SearchEngine {
       SELECT COUNT(*)::bigint AS count FROM "Product" p WHERE ${whereAll}
     `);
 
+    // Facet aggregates are the expensive half of a search (one GROUP BY per
+    // enabled facet). They depend only on the predicate set, not on the page or
+    // sort, so paging and re-sorting reuse the cached counts.
+    const signature = facetSignature(q, normalized, rule);
     const facetsPromise = this.computeFacets(
       base,
       availPred,
       textPred,
       filterPreds,
       cfg,
+      signature,
     );
 
     const [rows, countRows, facets] = await Promise.all([
@@ -322,7 +469,7 @@ export class PostgresSearchEngine implements SearchEngine {
     return {
       hits,
       total,
-      page: q.page,
+      page,
       perPage: q.perPage,
       facets,
       suggestion,
@@ -366,6 +513,7 @@ export class PostgresSearchEngine implements SearchEngine {
     textPred: Prisma.Sql,
     filterPreds: Map<string, Prisma.Sql>,
     cfg: Awaited<ReturnType<typeof getShopConfig>>,
+    signature: string,
   ): Promise<Facet[]> {
     const othersThan = (source: string) =>
       [...filterPreds.entries()]
@@ -385,102 +533,110 @@ export class PostgresSearchEngine implements SearchEngine {
     const enabled = cfg.filters.filter((f) => f.enabled);
 
     const built = await Promise.all(
-      enabled.map(async (fc): Promise<Facet | null> => {
-        if (fc.source === "price") {
-          const rows = await prisma.$queryRaw<{ min: number | null; max: number | null }[]>(
-            Prisma.sql`SELECT MIN(p."priceMin") AS min, MAX(p."priceMax") AS max
-                       FROM "Product" p WHERE ${whereExcept("price")}`,
-          );
-          const min = rows[0]?.min;
-          const max = rows[0]?.max;
-          // No matching products => no meaningful range; drop the facet rather
-          // than render a 0–0 slider.
-          if (min == null || max == null) return null;
-          return {
-            source: "price",
-            label: fc.label,
-            displayAs: "range",
-            values: [],
-            min: Number(min),
-            max: Number(max),
-          };
-        }
+      enabled.map((fc) =>
+        facetCache.wrap(`${signature}|${fc.source}`, async (): Promise<Facet | null> => {
+          if (fc.source === "price") {
+            const rows = await prisma.$queryRaw<{ min: number | null; max: number | null }[]>(
+              Prisma.sql`SELECT MIN(p."priceMin") AS min, MAX(p."priceMax") AS max
+                         FROM "Product" p WHERE ${whereExcept("price")}`,
+            );
+            const min = rows[0]?.min;
+            const max = rows[0]?.max;
+            // No matching products => no meaningful range; drop the facet rather
+            // than render a 0–0 slider.
+            if (min == null || max == null) return null;
+            return {
+              source: "price",
+              label: fc.label,
+              displayAs: "range",
+              values: [],
+              min: Number(min),
+              max: Number(max),
+            };
+          }
 
-        if (fc.source === "availability") {
-          const rows = await prisma.$queryRaw<{ available: boolean; count: bigint }[]>(
-            Prisma.sql`SELECT p."available" AS available, COUNT(*)::bigint AS count
-                       FROM "Product" p WHERE ${whereForAvailability()}
-                       GROUP BY p."available"`,
-          );
-          const values = rows
-            .map((r) => ({
-              value: r.available ? "in_stock" : "out_of_stock",
-              label: r.available ? "In stock" : "Out of stock",
+          if (fc.source === "availability") {
+            const rows = await prisma.$queryRaw<{ available: boolean; count: bigint }[]>(
+              Prisma.sql`SELECT p."available" AS available, COUNT(*)::bigint AS count
+                         FROM "Product" p WHERE ${whereForAvailability()}
+                         GROUP BY p."available"`,
+            );
+            const values = rows
+              .map((r) => ({
+                value: r.available ? "in_stock" : "out_of_stock",
+                label: r.available ? "In stock" : "Out of stock",
+                count: Number(r.count),
+              }))
+              .sort((a) => (a.value === "in_stock" ? -1 : 1));
+            return values.length
+              ? { source: fc.source, label: fc.label, displayAs: fc.displayAs, values }
+              : null;
+          }
+
+          const where = whereExcept(fc.source);
+          let rows: { value: string; count: bigint }[] = [];
+
+          if (fc.source === "vendor") {
+            rows = await prisma.$queryRaw(Prisma.sql`
+              SELECT p."vendor" AS value, COUNT(*)::bigint AS count FROM "Product" p
+              WHERE ${where} AND p."vendor" <> '' GROUP BY p."vendor" ORDER BY count DESC LIMIT 50`);
+          } else if (fc.source === "productType") {
+            rows = await prisma.$queryRaw(Prisma.sql`
+              SELECT p."productType" AS value, COUNT(*)::bigint AS count FROM "Product" p
+              WHERE ${where} AND p."productType" <> '' GROUP BY p."productType" ORDER BY count DESC LIMIT 50`);
+          } else if (fc.source === "tag") {
+            rows = await prisma.$queryRaw(Prisma.sql`
+              SELECT tag AS value, COUNT(*)::bigint AS count
+              FROM "Product" p, unnest(p."tags") AS tag
+              WHERE ${where} GROUP BY tag ORDER BY count DESC LIMIT 50`);
+          } else if (fc.source === "collection") {
+            rows = await prisma.$queryRaw(Prisma.sql`
+              SELECT handle AS value, COUNT(*)::bigint AS count
+              FROM "Product" p, unnest(p."collections") AS handle
+              WHERE ${where} GROUP BY handle ORDER BY count DESC LIMIT 50`);
+          } else if (fc.source.startsWith("option:")) {
+            const opt = fc.source.slice("option:".length);
+            rows = await prisma.$queryRaw(Prisma.sql`
+              SELECT val AS value, COUNT(*)::bigint AS count
+              FROM "Product" p, jsonb_array_elements_text(COALESCE(p."options" -> ${opt}, '[]'::jsonb)) AS val
+              WHERE ${where} GROUP BY val ORDER BY count DESC LIMIT 50`);
+          } else if (fc.source.startsWith("metafield:")) {
+            // Metafield facets were configurable but never counted, so the facet
+            // simply never appeared. Aggregate over the mirrored metafield map.
+            const key = fc.source.slice("metafield:".length);
+            rows = await prisma.$queryRaw(Prisma.sql`
+              SELECT p."metafields" ->> ${key} AS value, COUNT(*)::bigint AS count
+              FROM "Product" p
+              WHERE ${where} AND COALESCE(p."metafields" ->> ${key}, '') <> ''
+              GROUP BY 1 ORDER BY count DESC LIMIT 50`);
+          }
+
+          if (!rows.length) return null;
+
+          // Collection facets store handles; show the human title when we have it.
+          const labelFor =
+            fc.source === "collection"
+              ? (v: string) => cfg.collectionTitles.get(v) ?? v
+              : (v: string) => v;
+
+          const values: FacetValue[] = rows.map((r) => {
+            const swatch = cfg.swatches.get(String(r.value).toLowerCase());
+            return {
+              value: r.value,
+              label: labelFor(r.value),
               count: Number(r.count),
-            }))
-            .sort((a) => (a.value === "in_stock" ? -1 : 1));
-          return values.length
-            ? { source: fc.source, label: fc.label, displayAs: fc.displayAs, values }
-            : null;
-        }
+              ...(swatch ? { swatch } : {}),
+            };
+          });
 
-        const where = whereExcept(fc.source);
-        let rows: { value: string; count: bigint }[] = [];
-
-        if (fc.source === "vendor") {
-          rows = await prisma.$queryRaw(Prisma.sql`
-            SELECT p."vendor" AS value, COUNT(*)::bigint AS count FROM "Product" p
-            WHERE ${where} AND p."vendor" <> '' GROUP BY p."vendor" ORDER BY count DESC LIMIT 50`);
-        } else if (fc.source === "productType") {
-          rows = await prisma.$queryRaw(Prisma.sql`
-            SELECT p."productType" AS value, COUNT(*)::bigint AS count FROM "Product" p
-            WHERE ${where} AND p."productType" <> '' GROUP BY p."productType" ORDER BY count DESC LIMIT 50`);
-        } else if (fc.source === "tag") {
-          rows = await prisma.$queryRaw(Prisma.sql`
-            SELECT tag AS value, COUNT(*)::bigint AS count
-            FROM "Product" p, unnest(p."tags") AS tag
-            WHERE ${where} GROUP BY tag ORDER BY count DESC LIMIT 50`);
-        } else if (fc.source === "collection") {
-          rows = await prisma.$queryRaw(Prisma.sql`
-            SELECT handle AS value, COUNT(*)::bigint AS count
-            FROM "Product" p, unnest(p."collections") AS handle
-            WHERE ${where} GROUP BY handle ORDER BY count DESC LIMIT 50`);
-        } else if (fc.source.startsWith("option:")) {
-          const opt = fc.source.slice("option:".length);
-          rows = await prisma.$queryRaw(Prisma.sql`
-            SELECT val AS value, COUNT(*)::bigint AS count
-            FROM "Product" p, jsonb_array_elements_text(COALESCE(p."options" -> ${opt}, '[]'::jsonb)) AS val
-            WHERE ${where} GROUP BY val ORDER BY count DESC LIMIT 50`);
-        } else if (fc.source.startsWith("metafield:")) {
-          // Metafield facets were configurable but never counted, so the facet
-          // simply never appeared. Aggregate over the mirrored metafield map.
-          const key = fc.source.slice("metafield:".length);
-          rows = await prisma.$queryRaw(Prisma.sql`
-            SELECT p."metafields" ->> ${key} AS value, COUNT(*)::bigint AS count
-            FROM "Product" p
-            WHERE ${where} AND COALESCE(p."metafields" ->> ${key}, '') <> ''
-            GROUP BY 1 ORDER BY count DESC LIMIT 50`);
-        }
-
-        if (!rows.length) return null;
-
-        // Collection facets store handles; show the human title when we have it.
-        const labelFor =
-          fc.source === "collection"
-            ? (v: string) => cfg.collectionTitles.get(v) ?? v
-            : (v: string) => v;
-
-        return {
-          source: fc.source,
-          label: fc.label,
-          displayAs: fc.displayAs,
-          values: rows.map((r) => ({
-            value: r.value,
-            label: labelFor(r.value),
-            count: Number(r.count),
-          })),
-        };
-      }),
+          return {
+            source: fc.source,
+            label: fc.label,
+            displayAs: fc.displayAs,
+            values,
+          };
+        }) as Promise<Facet | null>,
+      ),
     );
 
     return built.filter((f): f is Facet => f !== null);
@@ -503,6 +659,7 @@ export class PostgresSearchEngine implements SearchEngine {
              similarity(${uaLower(Prisma.sql`p."title"`)}, ${term}) AS sim
       FROM "Product" p
       WHERE p."shopId" = ${shopId} AND p."status" = 'ACTIVE'
+        AND p."publishedOnline" = TRUE
         AND ${uaLower(Prisma.sql`p."title"`)} % ${term}
       ORDER BY sim DESC
       LIMIT 5`);
@@ -553,6 +710,11 @@ export class PostgresSearchEngine implements SearchEngine {
       Prisma.sql`p."searchVector" @@ ${tsq}`,
       like(title, `%${esc}%`),
     ];
+    if (looksLikeSku(normalized)) {
+      matchParts.push(
+        Prisma.sql`EXISTS (SELECT 1 FROM unnest(p."skus") s WHERE lower(s) = ${normalized})`,
+      );
+    }
     if (fuzzy) {
       matchParts.push(Prisma.sql`similarity(${title}, ${normalized}) > ${FUZZY_THRESHOLD}`);
     }
@@ -569,7 +731,8 @@ export class PostgresSearchEngine implements SearchEngine {
                 + ${simTerm}
                 + (CASE WHEN ${title} LIKE ${esc + "%"} ${ESC} THEN 2 ELSE 0 END)) AS score
         FROM "Product" p
-        WHERE p."shopId" = ${q.shopId} AND p."status" = 'ACTIVE' AND ${availPred}
+        WHERE p."shopId" = ${q.shopId} AND p."status" = 'ACTIVE'
+          AND p."publishedOnline" = TRUE AND ${availPred}
           AND (${Prisma.join(matchParts, " OR ")})
         ORDER BY score DESC, p."popularity" DESC
         LIMIT ${q.limit}`),
@@ -632,7 +795,8 @@ export class PostgresSearchEngine implements SearchEngine {
       prisma.$queryRaw<any[]>(Prisma.sql`
         SELECT ${HIT_COLUMNS}, LEFT(p."description", 300) AS description
         FROM "Product" p
-        WHERE p."shopId" = ${shopId} AND p."status" = 'ACTIVE' AND ${availPred}
+        WHERE p."shopId" = ${shopId} AND p."status" = 'ACTIVE'
+          AND p."publishedOnline" = TRUE AND ${availPred}
         ORDER BY p."popularity" DESC, p."publishedAt" DESC NULLS LAST
         LIMIT ${limit}`),
       // Biggest collections.
@@ -660,6 +824,136 @@ export class PostgresSearchEngine implements SearchEngine {
       pages: [],
     };
   }
+
+  /**
+   * Product recommendations. Same index, different surface — a PDP "you may also
+   * like" rail, a cart upsell, or the empty-search state. "related" prefers
+   * embedding neighbours when semantic search is configured and falls back to
+   * shared collection / type / tags, which works on every plan.
+   */
+  async recommend(q: RecommendationQuery): Promise<ProductHit[]> {
+    const limit = Math.min(Math.max(1, q.limit), 24);
+    const availPred = q.includeUnavailable
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`p."available" = TRUE`;
+    const base = Prisma.sql`p."shopId" = ${q.shopId} AND p."status" = 'ACTIVE'
+      AND p."publishedOnline" = TRUE AND ${availPred}`;
+    const collScope = q.collection
+      ? Prisma.sql`AND p."collections" && ARRAY[${q.collection}]::text[]`
+      : Prisma.sql``;
+
+    if (q.kind === "related" && q.productId) {
+      const anchorRows = await prisma.$queryRaw<any[]>(Prisma.sql`
+        SELECT p."id", p."productType", p."vendor", p."tags", p."collections",
+               (p."embedding" IS NOT NULL) AS "hasEmbedding"
+        FROM "Product" p
+        WHERE p."shopId" = ${q.shopId} AND p."productId" = ${q.productId}
+        LIMIT 1`).catch(async () =>
+          // The embedding column is absent when pgvector was unavailable.
+          prisma.$queryRaw<any[]>(Prisma.sql`
+            SELECT p."id", p."productType", p."vendor", p."tags", p."collections",
+                   FALSE AS "hasEmbedding"
+            FROM "Product" p
+            WHERE p."shopId" = ${q.shopId} AND p."productId" = ${q.productId}
+            LIMIT 1`),
+        );
+      const anchor = anchorRows[0];
+      if (!anchor) return [];
+
+      if (anchor.hasEmbedding && (await semanticReady())) {
+        const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+          SELECT ${HIT_COLUMNS},
+                 (1 - (p."embedding" <=> (SELECT a."embedding" FROM "Product" a WHERE a."id" = ${anchor.id}))) AS score
+          FROM "Product" p
+          WHERE ${base} ${collScope}
+            AND p."id" <> ${anchor.id}
+            AND p."embedding" IS NOT NULL
+          ORDER BY p."embedding" <=> (SELECT a."embedding" FROM "Product" a WHERE a."id" = ${anchor.id})
+          LIMIT ${limit}`);
+        if (rows.length) return rows.map((r) => rowToHit(r));
+      }
+
+      // Attribute fallback: shared collection is the strongest signal a merchant
+      // gives us, then product type, then tag overlap.
+      const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+        SELECT ${HIT_COLUMNS},
+               ( (CASE WHEN p."collections" && ${anchor.collections ?? []}::text[] THEN 3 ELSE 0 END)
+               + (CASE WHEN p."productType" = ${anchor.productType ?? ""} AND p."productType" <> '' THEN 2 ELSE 0 END)
+               + (CASE WHEN p."vendor" = ${anchor.vendor ?? ""} AND p."vendor" <> '' THEN 1 ELSE 0 END)
+               + (CASE WHEN p."tags" && ${anchor.tags ?? []}::text[] THEN 1 ELSE 0 END)
+               )::float AS score
+        FROM "Product" p
+        WHERE ${base} ${collScope} AND p."id" <> ${anchor.id}
+        ORDER BY score DESC, p."popularity" DESC
+        LIMIT ${limit}`);
+      return rows.filter((r) => Number(r.score) > 0).map((r) => rowToHit(r));
+    }
+
+    if (q.kind === "trending") {
+      // What shoppers actually clicked out of search in the last week.
+      const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+        SELECT ${HIT_COLUMNS}, COUNT(e."id")::float AS score
+        FROM "Product" p
+        JOIN "SearchEvent" e
+          ON e."shopId" = p."shopId" AND e."clickedProductId" = p."productId"
+        WHERE ${base} ${collScope}
+          AND e."createdAt" > NOW() - INTERVAL '7 days'
+        GROUP BY p."id"
+        ORDER BY score DESC
+        LIMIT ${limit}`);
+      if (rows.length) return rows.map((r) => rowToHit(r));
+      // A quiet week is not an error — fall through to bestsellers.
+    }
+
+    if (q.kind === "recent") {
+      const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+        SELECT ${HIT_COLUMNS}, 0::float AS score
+        FROM "Product" p
+        WHERE ${base} ${collScope}
+        ORDER BY p."publishedAt" DESC NULLS LAST
+        LIMIT ${limit}`);
+      return rows.map((r) => rowToHit(r));
+    }
+
+    const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT ${HIT_COLUMNS}, p."popularity" AS score
+      FROM "Product" p
+      WHERE ${base} ${collScope}
+      ORDER BY p."popularity" DESC, p."publishedAt" DESC NULLS LAST
+      LIMIT ${limit}`);
+    return rows.map((r) => rowToHit(r));
+  }
+}
+
+/**
+ * Cache key for a facet set. Encodes everything that changes the counts — shop,
+ * term, filters, scope, availability, and which merchandising rule is active —
+ * and deliberately omits page and sort, which do not.
+ */
+function facetSignature(
+  q: SearchQuery,
+  normalized: string,
+  rule: MerchRule | null,
+): string {
+  const filters = Object.entries(q.filters)
+    .filter(([, v]) => v?.length)
+    .map(([k, v]) => `${k}=${[...v].sort().join(",")}`)
+    .sort()
+    .join("&");
+  const price = q.price ? `${q.price.min ?? ""}-${q.price.max ?? ""}` : "";
+  const ruleKey = rule
+    ? `${rule.triggerQuery ?? ""}/${rule.triggerCollection ?? ""}/${rule.priority}`
+    : "";
+  return [
+    q.shopId,
+    normalized,
+    q.collection ?? "",
+    q.includeUnavailable ? "1" : "0",
+    q.typoTolerance === false ? "0" : "1",
+    filters,
+    price,
+    ruleKey,
+  ].join(":");
 }
 
 /** Dice coefficient over character trigrams — mirrors pg_trgm's similarity()

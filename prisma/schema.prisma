@@ -53,6 +53,8 @@ model Shop {
   // JSON blob of merchant-tunable settings (widget theming, enabled filters, CRO toggles…)
   settings     Json     @default("{}")
   onboarded    Boolean  @default(false)
+  // Last time old SearchEvent rows were pruned for this shop.
+  analyticsPrunedAt DateTime?
 
   products      Product[]
   collections   Collection[]
@@ -128,8 +130,21 @@ model Product {
   // Free-form numeric/text metafields surfaced as filters
   metafields   Json     @default("{}")
 
+  // Flattened variant titles + SKUs, folded into the search vector so shoppers
+  // and staff can find a product by SKU or by a variant name ("red medium").
+  variantText  String   @default("")
+  skus         String[] @default([])
+
+  // Published to the Online Store sales channel. An ACTIVE product that is not
+  // published has no storefront URL — indexing it produces 404s in results.
+  publishedOnline Boolean @default(true)
+
   // Popularity signal for tie-breaking / boosting (orders, views…)
   popularity   Float    @default(0)
+  // Last time popularity decay was applied to this row.
+  popularityDecayedAt DateTime?
+  // Set when the pgvector embedding for this row was last written; null = stale.
+  embeddedAt   DateTime?
 
   publishedAt  DateTime?
   productUpdatedAt DateTime? // updatedAt from Shopify
@@ -139,7 +154,9 @@ model Product {
 
   @@unique([shopId, productId])
   @@index([shopId, status, available])
+  @@index([shopId, status, publishedOnline, available])
   @@index([shopId, handle])
+  @@index([shopId, embeddedAt])
 }
 
 model ProductVariant {
@@ -200,6 +217,12 @@ model MerchandisingRule {
   boostedProductIds String[] @default([]) // rank higher
   buriedProductIds  String[] @default([]) // rank lower
   hiddenProductIds  String[] @default([]) // remove from results
+  // Attribute-driven actions, so a merchant can say "boost anything tagged
+  // new-arrival" instead of pasting product ids. Shape:
+  //   [{ field: "tag"|"vendor"|"productType"|"collection"|"available"|"option:Color",
+  //      op: "eq"|"neq"|"contains", value: "new-arrival",
+  //      action: "boost"|"bury"|"hide"|"pin", weight: 5 }]
+  conditions Json     @default("[]")
   priority   Int      @default(0)
   createdAt  DateTime @default(now())
 
@@ -251,6 +274,10 @@ model SyncState {
   productCount Int      @default(0)
   // Live progress for the sync animation.
   phase        String   @default("idle") // idle | exporting | indexing | done | error
+  // Heartbeat written throughout a run. A "running" state whose heartbeat has
+  // gone quiet is a crashed run, not a live one.
+  startedAt    DateTime?
+  heartbeatAt  DateTime?
   progressCurrent Int   @default(0)
   progressTotal   Int   @default(0)
   message      String?

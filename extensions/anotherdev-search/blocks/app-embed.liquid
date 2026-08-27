@@ -9,7 +9,15 @@
   window.ADSF_CONFIG = {
     proxy: "/apps/anotherdev-search",
     resultsUrl: "/apps/anotherdev-search/results",
-    autoAttach: true
+    autoAttach: true,
+    {% comment %}
+      The shop's money format and the active market's rate. Prices are indexed in
+      the shop's own currency, so a shopper browsing in another market has to see
+      the converted amount in that market's format — not the raw stored number
+      rendered with the browser's locale.
+    {% endcomment %}
+    moneyFormat: {{ shop.money_format | json }},
+    shopCurrency: {{ shop.currency | json }}
   };
 </script>
 
@@ -27,7 +35,7 @@
     },
     {
       "type": "paragraph",
-      "content": "Enabled! Instant search is now live on your storefront. Configure the look and behaviour — panel style, colors, fonts, recommendations, hover preview — inside the AnotherDev Search app under Settings. Changes apply automatically."
+      "content": "Enabled! Instant search is now live on your storefront, including your theme's own search box and search page. Configure the look and behaviour — panel style, colors, fonts, recommendations, hover preview — inside the AnotherDev Search app under Settings. Changes apply automatically."
     }
   ]
 }

@@ -1,0 +1,57 @@
+{% comment %}
+  AnotherDev Search — recommendation rail.
+
+  Same index, different surface: "related" on a product page, "trending" or
+  "bestsellers" anywhere else. Drop it on a product template, the cart, or a
+  landing page.
+{% endcomment %}
+
+{%- assign adsf_kind = block.settings.kind | default: 'related' -%}
+{%- comment -%}
+  On a product template this resolves to the product being viewed, so one block
+  serves every product.
+{%- endcomment -%}
+{%- assign adsf_product_id = product.id -%}
+
+<section
+  class="adsf-rec"
+  data-adsf-recommend
+  data-kind="{{ adsf_kind }}"
+  data-product-id="{{ adsf_product_id }}"
+  data-collection="{{ block.settings.collection_scope | default: collection.handle }}"
+  data-limit="{{ block.settings.limit | default: 8 }}"
+  data-proxy="{{ block.settings.proxy_base | default: '/apps/anotherdev-search' }}"
+  data-money-format="{{ shop.money_format | escape }}"
+>
+  <h2 class="adsf-rec__heading">{{ block.settings.heading | default: 'You may also like' }}</h2>
+  <div class="adsf-rec__track" data-adsf-rec-track></div>
+</section>
+
+{{ 'anotherdev-search.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'anotherdev-search.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "AnotherDev Recommendations",
+  "target": "section",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "You may also like" },
+    {
+      "type": "select",
+      "id": "kind",
+      "label": "What to show",
+      "default": "related",
+      "options": [
+        { "value": "related", "label": "Related to this product" },
+        { "value": "trending", "label": "Trending in search this week" },
+        { "value": "bestsellers", "label": "Best sellers" },
+        { "value": "recent", "label": "New arrivals" }
+      ],
+      "info": "\"Related\" needs a product page. Elsewhere it falls back to best sellers."
+    },
+    { "type": "range", "id": "limit", "label": "How many products", "min": 4, "max": 16, "step": 2, "default": 8 },
+    { "type": "text", "id": "collection_scope", "label": "Limit to a collection (handle)", "info": "Optional." },
+    { "type": "text", "id": "proxy_base", "label": "App proxy base path", "default": "/apps/anotherdev-search" }
+  ]
+}
+{% endschema %}

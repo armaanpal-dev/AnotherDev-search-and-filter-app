@@ -74,6 +74,13 @@ module.exports = {
         "plugin:import/recommended",
         "plugin:import/typescript",
       ],
+      rules: {
+        // Raw SQL result rows, Shopify webhook payloads and GraphQL responses
+        // are genuinely untyped at the boundary — every one of them is validated
+        // or narrowed immediately afterwards. Erroring here only bought a wall
+        // of `eslint-disable` comments, so this stays visible as a warning.
+        "@typescript-eslint/no-explicit-any": "warn",
+      },
     },
 
     // Node

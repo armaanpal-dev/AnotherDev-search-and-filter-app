@@ -9,21 +9,33 @@ import { invalidateShopConfig } from "../lib/search/config.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
-  // Surface discovered option names so the merchant can enable them as facets.
-  const products = await prisma.product.findMany({
-    where: { shopId: shop.id },
-    select: { options: true },
-    take: 500,
-  });
-  const optionNames = new Set<string>();
-  for (const p of products) {
-    Object.keys((p.options as Record<string, unknown>) ?? {}).forEach((k) => optionNames.add(k));
-  }
-  const filters = await prisma.filterConfig.findMany({
-    where: { shopId: shop.id },
-    orderBy: { position: "asc" },
-  });
-  return { filters, discoveredOptions: [...optionNames] };
+  // Surface every option and metafield key present in the catalog so a merchant
+  // can turn one into a facet without guessing the exact spelling. Done in SQL
+  // over the whole catalog: sampling the first 500 products missed attributes
+  // that only appear further down a large catalog.
+  const [optionRows, metafieldRows, filters] = await Promise.all([
+    prisma.$queryRaw<{ name: string }[]>`
+      SELECT DISTINCT jsonb_object_keys("options") AS name
+      FROM "Product" WHERE "shopId" = ${shop.id} LIMIT 50`,
+    prisma.$queryRaw<{ name: string }[]>`
+      SELECT DISTINCT jsonb_object_keys("metafields") AS name
+      FROM "Product" WHERE "shopId" = ${shop.id} LIMIT 50`,
+    prisma.filterConfig.findMany({
+      where: { shopId: shop.id },
+      orderBy: { position: "asc" },
+    }),
+  ]);
+
+  const configured = new Set(filters.map((f) => f.source));
+  return {
+    filters,
+    discoveredOptions: optionRows
+      .map((r) => `option:${r.name}`)
+      .filter((s) => !configured.has(s)),
+    discoveredMetafields: metafieldRows
+      .map((r) => `metafield:${r.name}`)
+      .filter((s) => !configured.has(s)),
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -58,8 +70,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function FiltersPage() {
-  const { filters, discoveredOptions } = useLoaderData<typeof loader>();
+  const { filters, discoveredOptions, discoveredMetafields } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  const discovered = [...discoveredOptions, ...discoveredMetafields];
 
   return (
     <s-page heading="Filters">
@@ -108,13 +122,21 @@ export default function FiltersPage() {
             <s-button variant="primary" type="submit">Add facet</s-button>
           </s-stack>
         </fetcher.Form>
-        {discoveredOptions.length > 0 && (
+        {discovered.length > 0 && (
           <s-paragraph>
             <s-text color="subdued">
-              Detected product options you can add: {discoveredOptions.map((o) => `option:${o}`).join(", ")}
+              Found in your catalog and not yet used as a filter:{" "}
+              {discovered.join(", ")}
             </s-text>
           </s-paragraph>
         )}
+        <s-paragraph>
+          <s-text color="subdued">
+            Colour swatches read their colours from{" "}
+            <s-link href="/app/settings">Settings → Colour swatches</s-link>. Anything
+            not mapped there falls back to a built-in list of common colour names.
+          </s-text>
+        </s-paragraph>
       </s-section>
     </s-page>
   );

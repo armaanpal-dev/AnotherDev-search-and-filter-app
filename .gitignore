@@ -14,7 +14,9 @@ database.sqlite
 .env
 .env.*
 
-package-lock.json
+# package-lock.json is COMMITTED on purpose: `npm ci` (used by CI and the
+# Dockerfile) requires it, and it is what pins the exact dependency tree that
+# was tested. Only the other package managers' lockfiles are ignored.
 yarn.lock
 pnpm-lock.yaml
 

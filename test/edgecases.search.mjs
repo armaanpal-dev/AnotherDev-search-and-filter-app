@@ -54,6 +54,10 @@ try {
   await mk({ productId: "4", handle: "draft-thing", title: "Secret Draft Thing", status: "DRAFT", priceMin: 99, priceMax: 99, vendor: "Hidden", options: {} });
   await mk({ productId: "5", handle: "freebie", title: "Zero Price Freebie", priceMin: 0, priceMax: 0, vendor: "Gizmo", productType: "Widget", options: {} });
   await mk({ productId: "6", handle: "nihongo", title: "日本語 Sample 商品", priceMin: 12, priceMax: 12, vendor: "Tokyo", options: {} });
+  // v2 fixtures: SKU/variant indexing, publication state, metafield facets.
+  await mk({ productId: "100", handle: "sku-widget", title: "Anonymous Gadget", priceMin: 40, priceMax: 40, vendor: "Gizmo", productType: "Widget", options: { Color: ["Red"] }, skus: ["TSH-RED-M1", "ALT-9"], variantText: "Red Medium", metafields: { material: "wool" } });
+  await mk({ productId: "101", handle: "unpublished-thing", title: "Unpublished Widget Thing", priceMin: 7, priceMax: 7, vendor: "Gizmo", productType: "Widget", options: {}, publishedOnline: false });
+  await mk({ productId: "102", handle: "clearance-widget", title: "Clearance Widget Special", priceMin: 3, priceMax: 3, vendor: "Gizmo", productType: "Widget", options: {}, tags: ["clearance"], metafields: { material: "cotton" } });
   // bulk for pagination
   for (let i = 7; i <= 26; i++) {
     await mk({ productId: String(i), handle: "widget-" + i, title: "Gizmo Widget " + i, priceMin: i, priceMax: i, vendor: "Gizmo", productType: "Widget", options: { Color: [i % 2 ? "Red" : "Blue"] } });
@@ -205,6 +209,154 @@ try {
   await check("did-you-mean suggestion for a near-miss", async () => {
     const r = await S({ term: "freebei" }); // misspelling of freebie
     assert.ok(r.suggestion === undefined || typeof r.suggestion === "string");
+  });
+
+  /* ---------------- v2: things that were broken or missing ---------------- */
+
+  await check("bare '%' does not match the whole catalog", async () => {
+    // escapeLike was a no-op, so this became LIKE '%%%' and returned everything.
+    const r = await S({ term: "%" });
+    assert.ok(r.total < 26, `'%' returned ${r.total} products`);
+  });
+
+  await check("'100%' matches the literal string, not everything", async () => {
+    const r = await S({ term: "100%" });
+    assert.ok(r.hits.every((h) => h.handle !== "nihongo"), "unrelated product matched");
+  });
+
+  await check("underscore is literal, not a single-char wildcard", async () => {
+    // Typo tolerance off: with fuzzy matching on, trigram similarity would match
+    // "gizm_" to "Gizmo" regardless of escaping, so the assertion would prove
+    // nothing about the LIKE pattern.
+    const r = await S({ term: "gizm_", typoTolerance: false });
+    assert.ok(!r.hits.some((h) => h.title.startsWith("Gizmo")), "'_' behaved as a wildcard");
+  });
+
+  await check("pagination is stable when the sort key ties", async () => {
+    // Every seeded product has popularity 0, so relevance-browse ordering ties
+    // on the primary key. Without a unique tiebreaker Postgres may order the
+    // page-2 query differently from page 1, duplicating and skipping products.
+    const seen = new Set();
+    for (let page = 1; page <= 4; page++) {
+      const r = await S({ perPage: 5, page });
+      for (const hit of r.hits) {
+        assert.ok(!seen.has(hit.productId), `product ${hit.productId} appeared on two pages`);
+        seen.add(hit.productId);
+      }
+    }
+  });
+
+  await check("exact SKU finds the product and ranks it first", async () => {
+    const r = await S({ term: "TSH-RED-M1" });
+    assert.ok(r.hits.length > 0, "no hits for a known SKU");
+    assert.equal(r.hits[0].handle, "sku-widget");
+    assert.equal(r.strategy, "sku");
+  });
+
+  await check("second SKU on the same product also resolves", async () => {
+    const r = await S({ term: "ALT-9" });
+    assert.ok(r.hits.some((h) => h.handle === "sku-widget"));
+  });
+
+  await check("variant text is searchable ('Red Medium')", async () => {
+    const r = await S({ term: "Red Medium" });
+    assert.ok(r.hits.some((h) => h.handle === "sku-widget"));
+  });
+
+  await check("products not published to the Online Store are excluded", async () => {
+    // These have no storefront URL, so a result linking to one is a 404.
+    const r = await S({ term: "widget" });
+    assert.ok(!r.hits.some((h) => h.handle === "unpublished-thing"));
+  });
+
+  await check("unpublished products are excluded from autocomplete too", async () => {
+    const ac = await engine.autocomplete({ shopId: SID, term: "widget", limit: 20 });
+    assert.ok(!ac.products.some((p) => p.handle === "unpublished-thing"));
+  });
+
+  await check("metafield facet is counted and returned", async () => {
+    await prisma.filterConfig.create({ data: { shopId: SID, source: "metafield:material", label: "Material", displayAs: "checkbox", position: 9, enabled: true } });
+    invalidateShopConfig(SID);
+    const r = await S({ term: "" });
+    const facet = r.facets.find((f) => f.source === "metafield:material");
+    assert.ok(facet, "metafield facet missing");
+    assert.ok(facet.values.some((v) => v.value === "wool"));
+  });
+
+  await check("metafield facet filters results", async () => {
+    const r = await S({ filters: { "metafield:material": ["wool"] } });
+    assert.ok(r.total >= 1);
+    assert.ok(r.hits.every((h) => h.handle === "sku-widget"));
+  });
+
+  await check("attribute rule buries anything tagged clearance", async () => {
+    await prisma.merchandisingRule.create({ data: {
+      shopId: SID, name: "bury clearance", triggerQuery: "widget special", active: true, priority: 5,
+      conditions: [{ field: "tag", op: "eq", value: "clearance", action: "bury", weight: 20 }],
+    }});
+    invalidateShopConfig(SID);
+    const r = await S({ term: "widget special" });
+    const idx = r.hits.findIndex((h) => h.handle === "clearance-widget");
+    assert.ok(idx !== 0, "buried product still ranked first");
+  });
+
+  await check("attribute rule can hide products outright", async () => {
+    await prisma.merchandisingRule.deleteMany({ where: { shopId: SID, name: "bury clearance" } });
+    await prisma.merchandisingRule.create({ data: {
+      shopId: SID, name: "hide clearance", triggerQuery: "clearance widget", active: true, priority: 9,
+      conditions: [{ field: "tag", op: "eq", value: "clearance", action: "hide", weight: 5 }],
+    }});
+    invalidateShopConfig(SID);
+    const r = await S({ term: "clearance widget" });
+    assert.ok(!r.hits.some((h) => h.handle === "clearance-widget"));
+    await prisma.merchandisingRule.deleteMany({ where: { shopId: SID, name: "hide clearance" } });
+    invalidateShopConfig(SID);
+  });
+
+  await check("hits carry variant info for quick add-to-cart", async () => {
+    await prisma.productVariant.create({ data: {
+      productId: (await prisma.product.findFirst({ where: { shopId: SID, productId: "1" } })).id,
+      variantId: "v-1", title: "Default", sku: "LATTE-1", price: 10, available: true, optionValues: {},
+    }});
+    const r = await S({ term: "latte" });
+    const hit = r.hits.find((h) => h.handle === "cafe-creme");
+    assert.ok(hit, "latte not found");
+    assert.equal(hit.variantCount, 1);
+    assert.equal(hit.variantId, "v-1");
+  });
+
+  await check("deep pagination is capped instead of scanning", async () => {
+    const r = await S({ page: 999999 });
+    assert.ok(r.page <= 200, `page was ${r.page}`);
+  });
+
+  await check("recommend(bestsellers) returns products", async () => {
+    const rec = await engine.recommend({ shopId: SID, kind: "bestsellers", limit: 5 });
+    assert.ok(Array.isArray(rec) && rec.length > 0);
+  });
+
+  await check("recommend(related) finds catalog neighbours", async () => {
+    const rec = await engine.recommend({ shopId: SID, kind: "related", productId: "100", limit: 5 });
+    assert.ok(Array.isArray(rec));
+    assert.ok(!rec.some((p) => p.productId === "100"), "anchor recommended itself");
+  });
+
+  await check("recommend(related) on an unknown product is empty, not an error", async () => {
+    const rec = await engine.recommend({ shopId: SID, kind: "related", productId: "does-not-exist", limit: 5 });
+    assert.deepEqual(rec, []);
+  });
+
+  await check("facet cache does not leak between filter selections", async () => {
+    const all = await S({ term: "" });
+    const filtered = await S({ filters: { vendor: ["Tokyo"] } });
+    const vendorAll = all.facets.find((f) => f.source === "vendor");
+    const vendorFiltered = filtered.facets.find((f) => f.source === "vendor");
+    // Own-dimension exclusion means the vendor facet is the same either way,
+    // but the price facet must narrow to the filtered set.
+    assert.ok(vendorAll && vendorFiltered);
+    const priceFiltered = filtered.facets.find((f) => f.source === "price");
+    assert.ok(priceFiltered && priceFiltered.min === 12 && priceFiltered.max === 12,
+      `price facet did not narrow: ${JSON.stringify(priceFiltered)}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed.`);

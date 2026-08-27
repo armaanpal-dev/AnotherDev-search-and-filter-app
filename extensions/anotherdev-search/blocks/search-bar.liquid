@@ -10,6 +10,7 @@
   data-results-url="{{ block.settings.results_page | default: '/apps/anotherdev-search/results' }}"
   data-min-chars="{{ block.settings.min_chars | default: 2 }}"
   data-max-suggestions="{{ block.settings.max_suggestions | default: 6 }}"
+  data-money-format="{{ shop.money_format | escape }}"
   style="--adsf-accent: {{ block.settings.accent_color }};"
 >
   <form class="adsf-searchbar__form" role="search" action="{{ block.settings.results_page | default: '/apps/anotherdev-search/results' }}" method="get">

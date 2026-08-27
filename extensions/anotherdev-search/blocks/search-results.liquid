@@ -1,24 +1,35 @@
 {% comment %}
   AnotherDev Search — full results grid with faceted filters, sort, pagination.
-  Add this app block to your Search template (or a dedicated page) in the theme editor.
-  It reads ?q= from the URL and renders instantly from the app proxy JSON API.
+  Add this app block to your Search template, a collection template, or a
+  dedicated page. It reads ?q= from the URL and renders from the app proxy JSON API.
+
+  Layout and per-page settings come from the app (Settings), so the whole
+  storefront stays consistent; the block only carries what has to be per-placement.
 {% endcomment %}
+
+{%- comment -%}
+  On a collection template this resolves to the collection being viewed, so ONE
+  block works for every collection. A hand-typed handle in the block settings
+  cannot do that — collection templates are shared across all collections.
+{%- endcomment -%}
+{%- assign adsf_collection = block.settings.collection_scope | default: collection.handle -%}
 
 <div
   class="adsf-app"
   data-adsf-results-app
   data-proxy="{{ block.settings.proxy_base | default: '/apps/anotherdev-search' }}"
   data-per-page="{{ block.settings.per_page | default: 24 }}"
-  data-collection="{{ block.settings.collection_scope }}"
-  style="--adsf-accent: {{ block.settings.accent_color }}; --adsf-cols: {{ block.settings.columns | default: 4 }};"
+  data-collection="{{ adsf_collection }}"
+  data-money-format="{{ shop.money_format | escape }}"
+  style="--adsf-cols: {{ block.settings.columns | default: 4 }};"
 >
   <div class="adsf-app__topbar">
     <button type="button" class="adsf-app__filter-toggle" data-adsf-filter-toggle aria-expanded="false">
-      Filters
+      {{ 'search_results.filters' | t: default: 'Filters' }}
     </button>
     <div class="adsf-app__meta" data-adsf-meta aria-live="polite"></div>
     <label class="adsf-app__sort">
-      <span class="adsf-visually-hidden">Sort by</span>
+      <span class="adsf-visually-hidden">{{ 'search_results.sort' | t: default: 'Sort by' }}</span>
       <select data-adsf-sort>
         <option value="relevance">Relevance</option>
         <option value="price_asc">Price: Low to High</option>
@@ -30,6 +41,9 @@
     </label>
   </div>
 
+  {% comment %} Removable chips for everything currently filtered. {% endcomment %}
+  <div class="adsf-app__chips" data-adsf-chips></div>
+
   <div class="adsf-app__body">
     <aside class="adsf-facets" data-adsf-facets aria-label="Filters">
       <div class="adsf-facets__inner" data-adsf-facets-inner></div>
@@ -38,7 +52,7 @@
     <div class="adsf-app__main">
       {% comment %} Reserve space to avoid layout shift while first results load. {% endcomment %}
       <div class="adsf-grid" data-adsf-grid aria-busy="true"></div>
-      <div class="adsf-pagination" data-adsf-pagination></div>
+      <nav class="adsf-pagination" data-adsf-pagination aria-label="Search results pages"></nav>
     </div>
   </div>
 
@@ -53,11 +67,12 @@
   "name": "AnotherDev Search Results",
   "target": "section",
   "settings": [
-    { "type": "color", "id": "accent_color", "label": "Accent color", "default": "#111111" },
     { "type": "range", "id": "columns", "label": "Grid columns (desktop)", "min": 2, "max": 5, "step": 1, "default": 4 },
     { "type": "range", "id": "per_page", "label": "Products per page", "min": 12, "max": 48, "step": 4, "default": 24 },
-    { "type": "text", "id": "collection_scope", "label": "Scope to collection (handle)", "info": "Leave blank for site-wide search." },
-    { "type": "text", "id": "proxy_base", "label": "App proxy base path", "default": "/apps/anotherdev-search" }
+    { "type": "text", "id": "collection_scope", "label": "Scope to a specific collection (handle)", "info": "Leave blank: on a collection template it follows the collection being viewed; anywhere else it searches the whole store." },
+    { "type": "text", "id": "proxy_base", "label": "App proxy base path", "default": "/apps/anotherdev-search" },
+    { "type": "header", "content": "Colours and fonts" },
+    { "type": "paragraph", "content": "Set in the AnotherDev Search app under Settings, so the search bar, results page and collection filters all match." }
   ]
 }
 {% endschema %}

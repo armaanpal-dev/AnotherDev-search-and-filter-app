@@ -1,6 +1,7 @@
 import type { FilterSelection, PriceRange, SortKey } from "./search/types";
 import { getShopByDomain } from "./shop.server";
 import { resolveSettings, type WidgetSettings } from "./settings";
+import { stripLiquid } from "./search/normalize";
 
 const VALID_SORTS: SortKey[] = [
   "relevance",
@@ -13,6 +14,15 @@ const VALID_SORTS: SortKey[] = [
 ];
 
 const MAX_PER_PAGE = 48;
+
+// Mirrors MAX_PAGE in the engine. Deep pagination is a crawler artefact, not a
+// shopper behaviour, and OFFSET makes it expensive.
+const MAX_PAGE = 200;
+
+// A shopper cannot meaningfully select more than a handful of values per facet;
+// an unbounded list is a way to make one request build an enormous IN clause.
+const MAX_FILTER_VALUES = 30;
+const MAX_FILTER_SOURCES = 20;
 
 /**
  * The storefront-facing base path of the App Proxy (e.g. `/apps/anotherdev-search`).
@@ -46,7 +56,10 @@ export function parseSearchParams(
   collection?: string;
 } {
   const term = (sp.get("q") ?? sp.get("term") ?? "").slice(0, 200);
-  const page = Math.max(1, parseInt(sp.get("page") ?? "1", 10) || 1);
+  const page = Math.min(
+    MAX_PAGE,
+    Math.max(1, parseInt(sp.get("page") ?? "1", 10) || 1),
+  );
   const fallbackPerPage = defaults.perPage ?? 24;
   const perPage = Math.min(
     MAX_PER_PAGE,
@@ -65,7 +78,10 @@ export function parseSearchParams(
     if (!key.startsWith("f.")) continue;
     const source = key.slice(2);
     if (!value) continue;
-    (filters[source] ??= []).push(value);
+    if (!filters[source] && Object.keys(filters).length >= MAX_FILTER_SOURCES) continue;
+    const bucket = (filters[source] ??= []);
+    if (bucket.length >= MAX_FILTER_VALUES) continue;
+    bucket.push(value.slice(0, 200));
   }
 
   let price: PriceRange | undefined;
@@ -82,7 +98,7 @@ export function parseSearchParams(
     if (clean.min != null || clean.max != null) price = clean;
   }
 
-  const collection = sp.get("collection") ?? undefined;
+  const collection = sp.get("collection")?.slice(0, 200) || undefined;
 
   return { term, page, perPage, sort, filters, price, collection };
 }
@@ -127,4 +143,35 @@ export function jsonCors(
       ...extraHeaders,
     },
   });
+}
+
+/**
+ * Escape a value for interpolation into an App Proxy Liquid response.
+ *
+ * Both halves matter. HTML-escaping stops markup injection in the rendered page;
+ * `stripLiquid` stops the value being executed as Liquid, because Shopify renders
+ * proxy responses through the theme's Liquid engine before the browser ever sees
+ * them. HTML escaping alone leaves `{{ ... }}` intact — `{` and `%` are not
+ * HTML-special — so a search term or product title could read shop data.
+ */
+export function escapeLiquidHtml(s: string): string {
+  return stripLiquid(String(s ?? ""))
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Identify the caller for rate-limiting purposes. Shopify forwards the shopper's
+ * address in the usual proxy headers; the shop domain is the fallback so a
+ * missing header degrades to a per-shop budget instead of no budget at all.
+ */
+export function clientKey(request: Request, shopDomain: string): string {
+  const fwd =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("cf-connecting-ip") ||
+    "";
+  return `${shopDomain}:${fwd || "unknown"}`;
 }
