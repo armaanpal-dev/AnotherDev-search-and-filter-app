@@ -1,0 +1,52 @@
+{% comment %}
+  AnotherDev Search — instant search bar with autocomplete dropdown.
+  Add this app block to your header (or anywhere) via the theme editor.
+{% endcomment %}
+
+<div
+  class="adsf-searchbar"
+  data-adsf-searchbar
+  data-proxy="{{ block.settings.proxy_base | default: '/apps/anotherdev-search' }}"
+  data-results-url="{{ block.settings.results_page | default: '/apps/anotherdev-search/results' }}"
+  data-min-chars="{{ block.settings.min_chars | default: 2 }}"
+  data-max-suggestions="{{ block.settings.max_suggestions | default: 6 }}"
+  style="--adsf-accent: {{ block.settings.accent_color }};"
+>
+  <form class="adsf-searchbar__form" role="search" action="{{ block.settings.results_page | default: '/apps/anotherdev-search/results' }}" method="get">
+    <input
+      type="search"
+      name="q"
+      class="adsf-searchbar__input"
+      placeholder="{{ block.settings.placeholder | default: 'Search products…' }}"
+      autocomplete="off"
+      aria-label="Search products"
+      data-adsf-input
+    >
+    <button type="submit" class="adsf-searchbar__submit" aria-label="Search">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="2"/>
+        <path d="m14 14 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </form>
+
+  <div class="adsf-dropdown" data-adsf-dropdown hidden role="listbox" aria-label="Search suggestions"></div>
+</div>
+
+{{ 'anotherdev-search.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'anotherdev-search.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "AnotherDev Search Bar",
+  "target": "section",
+  "settings": [
+    { "type": "text", "id": "placeholder", "label": "Placeholder text", "default": "Search products…" },
+    { "type": "color", "id": "accent_color", "label": "Accent color", "default": "#111111" },
+    { "type": "range", "id": "min_chars", "label": "Min characters to trigger", "min": 1, "max": 4, "step": 1, "default": 2 },
+    { "type": "range", "id": "max_suggestions", "label": "Max product suggestions", "min": 3, "max": 12, "step": 1, "default": 6 },
+    { "type": "url", "id": "results_page", "label": "Results page URL", "info": "Defaults to the app's SEO results page." },
+    { "type": "text", "id": "proxy_base", "label": "App proxy base path", "default": "/apps/anotherdev-search" }
+  ]
+}
+{% endschema %}

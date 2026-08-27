@@ -1,0 +1,66 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# client_id is managed by the Shopify CLI — do not change it.
+client_id = "2bd4c8dfc90eafb9c76f96a56733c2cf"
+name = "Another Dev Search and Filter"
+handle = "anotherdev-search"
+application_url = "https://example.com"
+embedded = true
+
+[access_scopes]
+# Read-only: we mirror the catalog into our own index; we never write to the store.
+scopes = "read_products,read_product_listings,read_collection_listings,read_inventory,read_content"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://example.com/auth/callback" ]
+
+[webhooks]
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "products/create" ]
+  uri = "/webhooks/products/upsert"
+
+  [[webhooks.subscriptions]]
+  topics = [ "products/update" ]
+  uri = "/webhooks/products/upsert"
+
+  [[webhooks.subscriptions]]
+  topics = [ "products/delete" ]
+  uri = "/webhooks/products/delete"
+
+  [[webhooks.subscriptions]]
+  topics = [ "collections/update" ]
+  uri = "/webhooks/products/upsert"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
+
+# Storefront search API served through an App Proxy on the merchant's own domain.
+[app_proxy]
+url = "https://example.com/proxy"
+subpath = "anotherdev-search"
+prefix = "apps"
+
+[pos]
+embedded = false
+
+[build]

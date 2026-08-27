@@ -1,0 +1,164 @@
+/* AnotherDev Search & Filters — storefront styles.
+   Scoped under .adsf-* so it never fights the host theme. Mobile-first, no CLS. */
+
+.adsf-visually-hidden,
+.adsf-app__sort > span {
+  position: absolute !important;
+  width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* ---- Search bar + autocomplete ---- */
+.adsf-searchbar { position: relative; width: 100%; max-width: 520px; }
+.adsf-searchbar__form { display: flex; align-items: center; border: 1px solid #dcdcdc; border-radius: 8px; overflow: hidden; background: #fff; }
+.adsf-searchbar__input { flex: 1; border: 0; padding: 0.6rem 0.85rem; font-size: 0.95rem; outline: none; background: transparent; min-width: 0; }
+.adsf-searchbar__submit { display: flex; align-items: center; justify-content: center; border: 0; background: var(--adsf-accent, #111); color: #fff; padding: 0 0.85rem; align-self: stretch; cursor: pointer; }
+
+.adsf-dropdown {
+  position: absolute; z-index: 10000; top: calc(100% + 6px); left: 0; right: 0;
+  background: var(--adsf-dd-bg, #fff);
+  color: var(--adsf-dd-text, #1a1a1a);
+  font-size: var(--adsf-dd-font-size, 14px);
+  font-weight: var(--adsf-dd-font-weight, 400);
+  border: 1px solid #eee; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.16);
+  max-height: 78vh; overflow-y: auto; padding: 0.35rem;
+}
+.adsf-dropdown__section { padding: 0.25rem 0; }
+.adsf-dropdown__section + .adsf-dropdown__section,
+.adsf-dropdown__all { border-top: 1px solid rgba(0,0,0,.06); }
+/* Section label (PRODUCTS / COLLECTIONS / PAGES) */
+.adsf-dropdown__label {
+  text-transform: uppercase; letter-spacing: .06em; font-size: 0.68rem; font-weight: 600;
+  color: #9ca3af; padding: 0.35rem 0.6rem 0.25rem;
+}
+.adsf-dropdown__suggestion,
+.adsf-dropdown__product,
+.adsf-dropdown__collection,
+.adsf-dropdown__page,
+.adsf-dropdown__all { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-radius: 8px; text-decoration: none; color: inherit; }
+.adsf-dropdown__page { padding-left: 0.65rem; }
+.adsf-dropdown__suggestion svg { color: #9ca3af; flex: none; }
+.adsf-dropdown__suggestion.is-active, .adsf-dropdown__suggestion:hover,
+.adsf-dropdown__product.is-active, .adsf-dropdown__product:hover,
+.adsf-dropdown__collection.is-active, .adsf-dropdown__collection:hover,
+.adsf-dropdown__page.is-active, .adsf-dropdown__page:hover,
+.adsf-dropdown__all.is-active, .adsf-dropdown__all:hover { background: rgba(0,0,0,.05); }
+.adsf-dropdown__product img,
+.adsf-dropdown__noimg { width: 46px; height: 46px; object-fit: cover; border-radius: 6px; background: #f0f0f0; flex: none; }
+.adsf-dropdown__collection img,
+.adsf-dropdown__noimg--sm { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; background: #f0f0f0; flex: none; }
+.adsf-dropdown__pinfo { display: flex; flex-direction: column; min-width: 0; }
+.adsf-dropdown__ptitle,
+.adsf-dropdown__ctitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.adsf-dropdown__ctitle { flex: 1; }
+.adsf-dropdown__pprice { font-size: 0.82em; color: #6b7280; }
+.adsf-dropdown__count { font-size: 0.72rem; color: #9ca3af; background: rgba(0,0,0,.05); border-radius: 999px; padding: 1px 8px; flex: none; }
+/* Matched-text highlight */
+.adsf-hl { background: var(--adsf-hl-bg, transparent); color: var(--adsf-hl-color, inherit); font-weight: 700; padding: 0 1px; border-radius: 2px; }
+.adsf-dropdown__all { justify-content: center; font-weight: 600; color: var(--adsf-accent, #111); margin-top: 0.15rem; }
+.adsf-dropdown__empty { padding: 0.9rem; text-align: center; color: #9ca3af; }
+
+/* ---- Two-pane rich dropdown: hover preview (left) + results list (right) ---- */
+.adsf-dropdown--rich { display: flex; padding: 0; width: min(640px, 92vw); overflow: hidden; }
+.adsf-searchbar .adsf-dropdown--rich { right: auto; }
+.adsf-dropdown__list { flex: 1; min-width: 0; overflow-y: auto; max-height: 72vh; padding: 0.4rem; }
+.adsf-dropdown__preview {
+  width: 240px; flex: none; padding: 1rem; border-right: 1px solid rgba(0,0,0,.07);
+  display: flex; flex-direction: column; gap: 0.45rem; background: rgba(0,0,0,.015);
+}
+.adsf-preview__img { width: 100%; aspect-ratio: 1/1; object-fit: contain; border-radius: 10px; background: #f6f6f6; }
+.adsf-preview__noimg { width: 100%; aspect-ratio: 1/1; border-radius: 10px; background: #f0f0f0; }
+.adsf-preview__title { font-weight: 600; font-size: 0.95rem; line-height: 1.3; }
+.adsf-preview__price { font-weight: 700; }
+.adsf-preview__desc { font-size: 0.8rem; color: #6b7280; line-height: 1.45; max-height: 7.2em; overflow: hidden; }
+.adsf-preview__link { margin-top: auto; color: var(--adsf-accent, #111); font-weight: 600; font-size: 0.85rem; text-decoration: none; }
+.adsf-dropdown__product.is-preview { background: rgba(0,0,0,.05); }
+.adsf-dropdown--preview-right { flex-direction: row-reverse; }
+.adsf-dropdown--preview-right .adsf-dropdown__preview { border-right: 0; border-left: 1px solid rgba(0,0,0,.07); }
+@media (max-width: 749px) {
+  .adsf-dropdown--rich { width: min(94vw, 640px); }
+  .adsf-dropdown__preview { display: none; }
+}
+
+/* While our dropdown is open, hide the theme's OWN predictive-search results so
+   the two panels don't stack/overlap. Targets the common theme containers; our
+   own panel (.adsf-*) is never matched. Scoped to body.adsf-active so the theme
+   search behaves normally when ours isn't showing. */
+body.adsf-active predictive-search,
+body.adsf-active .predictive-search,
+body.adsf-active [data-predictive-search],
+body.adsf-active .search-modal__results,
+body.adsf-active .search__results,
+body.adsf-active .header__search-results,
+body.adsf-active .search-results,
+body.adsf-active .search-drawer__results,
+body.adsf-active .predictive-search__results { display: none !important; }
+
+/* Spotlight panel style: dim the page behind so the panel never looks like it
+   overlaps content. */
+.adsf-backdrop {
+  position: fixed; inset: 0; z-index: 99999;
+  background: rgba(17, 24, 39, 0.45);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.adsf-dropdown--spotlight {
+  max-width: 680px;
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.28);
+  padding: 0.5rem;
+}
+.adsf-dropdown--spotlight .adsf-dropdown__product,
+.adsf-dropdown--spotlight .adsf-dropdown__collection { padding: 0.6rem; }
+
+/* ---- Results app ---- */
+.adsf-app { --adsf-cols: 4; width: 100%; }
+.adsf-app__topbar { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0 1rem; flex-wrap: wrap; }
+.adsf-app__meta { flex: 1; min-width: 140px; color: #555; font-size: 0.92rem; }
+.adsf-app__meta a { color: var(--adsf-accent, #111); }
+.adsf-app__sort select { padding: 0.45rem 0.6rem; border: 1px solid #dcdcdc; border-radius: 8px; background: #fff; }
+.adsf-app__filter-toggle { display: none; padding: 0.45rem 0.9rem; border: 1px solid #dcdcdc; border-radius: 8px; background: #fff; cursor: pointer; font-weight: 600; }
+
+.adsf-app__body { display: grid; grid-template-columns: 240px 1fr; gap: 1.75rem; align-items: start; }
+
+.adsf-facets__inner { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1.4rem; }
+.adsf-facet__title { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.adsf-facet__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; max-height: 260px; overflow-y: auto; }
+.adsf-facet__item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+.adsf-facet__item label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.adsf-facet__count { color: #999; font-size: 0.8rem; }
+.adsf-facet__item--swatch label { gap: 0.5rem; }
+.adsf-swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); display: inline-block; }
+.adsf-facet__range { display: flex; align-items: center; gap: 0.4rem; }
+.adsf-facet__num { width: 72px; padding: 0.35rem 0.4rem; border: 1px solid #dcdcdc; border-radius: 6px; }
+.adsf-facet__apply { padding: 0.35rem 0.6rem; border: 0; border-radius: 6px; background: var(--adsf-accent, #111); color: #fff; cursor: pointer; }
+
+.adsf-grid { display: grid; grid-template-columns: repeat(var(--adsf-cols, 4), 1fr); gap: 1.25rem; min-height: 300px; }
+.adsf-grid[aria-busy="true"] { opacity: 0.5; }
+.adsf-card { position: relative; }
+.adsf-card a { text-decoration: none; color: inherit; display: block; }
+.adsf-card__img, .adsf-card__noimg { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 10px; background: #f2f2f2; display: block; }
+.adsf-card__title { margin: 0.5rem 0 0.25rem; font-size: 0.92rem; font-weight: 500; line-height: 1.3; }
+.adsf-card__price { font-weight: 600; font-size: 0.92rem; }
+.adsf-card__soldout { position: absolute; top: 8px; left: 8px; background: #fff; border: 1px solid #ddd; border-radius: 5px; padding: 2px 6px; font-size: 0.72rem; }
+.adsf-card--pinned::after { content: "Featured"; position: absolute; top: 8px; right: 8px; background: var(--adsf-accent, #111); color: #fff; border-radius: 5px; padding: 2px 6px; font-size: 0.7rem; }
+
+.adsf-pagination { display: flex; gap: 0.4rem; justify-content: center; margin: 2rem 0; flex-wrap: wrap; }
+.adsf-pagination button { padding: 0.4rem 0.7rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; }
+.adsf-pagination button[aria-current="page"] { background: var(--adsf-accent, #111); color: #fff; border-color: var(--adsf-accent, #111); }
+
+.adsf-empty, .adsf-error { grid-column: 1 / -1; text-align: center; padding: 3rem 1rem; color: #666; }
+.adsf-empty button { margin-top: 0.75rem; padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; }
+
+.adsf-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1100; }
+
+/* ---- Mobile ---- */
+@media (max-width: 749px) {
+  .adsf-app__body { grid-template-columns: 1fr; }
+  .adsf-app__filter-toggle { display: inline-block; }
+  .adsf-app { --adsf-cols: 2; }
+  .adsf-facets {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: 340px; z-index: 1200;
+    background: #fff; transform: translateX(-100%); transition: transform .25s ease; overflow-y: auto; padding: 1.25rem; box-shadow: 2px 0 24px rgba(0,0,0,.2);
+  }
+  .adsf-facets.is-open { transform: translateX(0); }
+  .adsf-facets__inner { position: static; }
+}

@@ -1,0 +1,258 @@
+// AnotherDev Search & Filters — data model
+// Postgres is the single datastore: it holds app config AND the search index.
+// Full-text (tsvector), fuzzy (pg_trgm) and accent-insensitive (unaccent) search
+// columns/indexes are added by a follow-up raw-SQL migration because Prisma does
+// not model those Postgres types natively. See prisma/migrations/*_search_index.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Runtime uses the pooled connection; migrations use the direct one.
+  // On Supabase: url = Transaction pooler (6543), directUrl = Direct (5432).
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// --- Shopify session storage (required by @shopify/shopify-app-session-storage-prisma) ---
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}
+
+// --- One row per installed store ---
+model Shop {
+  id           String   @id @default(cuid())
+  domain       String   @unique // foo.myshopify.com
+  name         String?
+  currencyCode String?
+  planName     String   @default("free")
+  installedAt  DateTime @default(now())
+  uninstalledAt DateTime?
+
+  // JSON blob of merchant-tunable settings (widget theming, enabled filters, CRO toggles…)
+  settings     Json     @default("{}")
+  onboarded    Boolean  @default(false)
+
+  products      Product[]
+  collections   Collection[]
+  pages         Page[]
+  synonyms      Synonym[]
+  redirects     Redirect[]
+  rules         MerchandisingRule[]
+  searchEvents  SearchEvent[]
+  syncState     SyncState?
+  filterConfig  FilterConfig[]
+
+  updatedAt    DateTime @updatedAt
+}
+
+// --- Collections mirror (for the autocomplete "Collections" section) ---
+model Collection {
+  id           String  @id @default(cuid())
+  shopId       String
+  shop         Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  collectionId String  // Shopify GID numeric part
+  handle       String
+  title        String
+  imageUrl     String?
+  productCount Int     @default(0)
+  indexedAt    DateTime @default(now())
+
+  @@unique([shopId, collectionId])
+  @@index([shopId])
+}
+
+// --- Pages mirror (for the autocomplete "Pages" section) ---
+model Page {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  pageId    String   // Shopify GID numeric part
+  handle    String
+  title     String
+  indexedAt DateTime @default(now())
+
+  @@unique([shopId, pageId])
+  @@index([shopId])
+}
+
+// --- Product mirror (the search index) ---
+// Denormalised for fast reads. `searchDocument`/`searchVector` are populated by
+// the raw-SQL migration; Prisma just reserves the plain columns it can model.
+model Product {
+  id           String   @id @default(cuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  productId    String   // Shopify GID numeric part, e.g. "81234567890"
+  handle       String
+  title        String
+  description  String   @default("")
+  vendor       String   @default("")
+  productType  String   @default("")
+  tags         String[] @default([])
+  status       String   @default("ACTIVE") // ACTIVE | DRAFT | ARCHIVED
+  available    Boolean  @default(true)
+
+  priceMin     Float    @default(0)
+  priceMax     Float    @default(0)
+  currencyCode String   @default("")
+  imageUrl     String?
+  imageAlt     String?
+
+  // Structured option values for faceting, e.g. { "Color": ["Red","Blue"], "Size": ["S","M"] }
+  options      Json     @default("{}")
+  // Collections this product belongs to (handles) for collection-scoped search/merchandising
+  collections  String[] @default([])
+  // Free-form numeric/text metafields surfaced as filters
+  metafields   Json     @default("{}")
+
+  // Popularity signal for tie-breaking / boosting (orders, views…)
+  popularity   Float    @default(0)
+
+  publishedAt  DateTime?
+  productUpdatedAt DateTime? // updatedAt from Shopify
+  indexedAt    DateTime @default(now())
+
+  variants     ProductVariant[]
+
+  @@unique([shopId, productId])
+  @@index([shopId, status, available])
+  @@index([shopId, handle])
+}
+
+model ProductVariant {
+  id          String  @id @default(cuid())
+  productId   String
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  variantId   String  // Shopify variant GID numeric part
+  title       String  @default("")
+  sku         String  @default("")
+  price       Float   @default(0)
+  available   Boolean @default(true)
+  // Selected option values, e.g. { "Color": "Red", "Size": "M" }
+  optionValues Json   @default("{}")
+
+  @@unique([productId, variantId])
+  @@index([productId])
+}
+
+// --- Merchant-configured relevance & routing ---
+model Synonym {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  // "multiway": all terms are interchangeable. "oneway": `input` maps to `terms`.
+  type      String   @default("multiway")
+  input     String?  // used only for oneway
+  terms     String[] @default([])
+  createdAt DateTime @default(now())
+
+  @@index([shopId])
+}
+
+model Redirect {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  query     String   // normalised search term that triggers the redirect
+  url       String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([shopId, query])
+  @@index([shopId])
+}
+
+model MerchandisingRule {
+  id         String   @id @default(cuid())
+  shopId     String
+  shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name       String
+  active     Boolean  @default(true)
+  // Trigger: a search query and/or a collection handle. Null = applies globally.
+  triggerQuery      String?
+  triggerCollection String?
+  // Actions
+  pinnedProductIds  String[] @default([]) // force to top, in order
+  boostedProductIds String[] @default([]) // rank higher
+  buriedProductIds  String[] @default([]) // rank lower
+  hiddenProductIds  String[] @default([]) // remove from results
+  priority   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([shopId, active])
+}
+
+model FilterConfig {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  // Which attribute this facet exposes: "price" | "vendor" | "productType" | "tag" | "option:Color" | "metafield:material"
+  source    String
+  label     String
+  // "checkbox" | "range" | "swatch" | "list"
+  displayAs String   @default("checkbox")
+  position  Int      @default(0)
+  enabled   Boolean  @default(true)
+
+  @@unique([shopId, source])
+  @@index([shopId, enabled])
+}
+
+// --- Analytics ---
+model SearchEvent {
+  id            String   @id @default(cuid())
+  shopId        String
+  shop          Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  query         String
+  normalized    String   @default("")
+  resultsCount  Int      @default(0)
+  clickedProductId String?
+  converted     Boolean  @default(false)
+  sessionToken  String?  // anonymous storefront session for CTR/CVR joins
+  createdAt     DateTime @default(now())
+
+  @@index([shopId, createdAt])
+  @@index([shopId, normalized])
+}
+
+// --- Sync bookkeeping ---
+model SyncState {
+  id           String   @id @default(cuid())
+  shopId       String   @unique
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  status       String   @default("idle") // idle | running | error
+  lastSyncAt   DateTime?
+  lastCursor   String?
+  bulkOpId     String?
+  productCount Int      @default(0)
+  // Live progress for the sync animation.
+  phase        String   @default("idle") // idle | exporting | indexing | done | error
+  progressCurrent Int   @default(0)
+  progressTotal   Int   @default(0)
+  message      String?
+  updatedAt    DateTime @updatedAt
+}

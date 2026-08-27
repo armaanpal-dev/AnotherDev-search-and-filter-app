@@ -1,0 +1,12 @@
+{
+  "search_bar": {
+    "name": "AnotherDev Search Bar",
+    "placeholder": "Search products…"
+  },
+  "search_results": {
+    "name": "AnotherDev Search Results",
+    "filters": "Filters",
+    "sort": "Sort by",
+    "no_results": "No products found."
+  }
+}

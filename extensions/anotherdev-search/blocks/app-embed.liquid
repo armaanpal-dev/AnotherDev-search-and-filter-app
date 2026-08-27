@@ -1,0 +1,34 @@
+{% comment %}
+  AnotherDev Search — APP EMBED (target: body).
+  Enabling this activates instant search on the storefront. ALL appearance and
+  behaviour settings live in the app (AnotherDev Search → Settings) and are loaded
+  live from the app, so there's nothing to configure here.
+{% endcomment %}
+
+<script>
+  window.ADSF_CONFIG = {
+    proxy: "/apps/anotherdev-search",
+    resultsUrl: "/apps/anotherdev-search/results",
+    autoAttach: true
+  };
+</script>
+
+{{ 'anotherdev-search.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'anotherdev-search.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "AnotherDev Search",
+  "target": "body",
+  "settings": [
+    {
+      "type": "header",
+      "content": "AnotherDev Search & Filters"
+    },
+    {
+      "type": "paragraph",
+      "content": "Enabled! Instant search is now live on your storefront. Configure the look and behaviour — panel style, colors, fonts, recommendations, hover preview — inside the AnotherDev Search app under Settings. Changes apply automatically."
+    }
+  ]
+}
+{% endschema %}

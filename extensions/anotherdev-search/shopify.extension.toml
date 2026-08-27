@@ -1,0 +1,8 @@
+# AnotherDev Search & Filters — theme app extension (storefront widget).
+api_version = "2025-10"
+
+[[extensions]]
+name = "AnotherDev Search & Filters"
+handle = "anotherdev-search"
+uid = "be952288-1603-a507-a5d5-bca4d530b15aadcce765"
+type = "theme"
