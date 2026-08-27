@@ -25,6 +25,9 @@ export interface ShopConfig {
   redirects: Map<string, string>;
   rules: MerchRule[];
   filters: FilterConfigLite[];
+  // handle -> title, so a collection facet can show "Summer Sale" instead of
+  // "summer-sale".
+  collectionTitles: Map<string, string>;
   matchRule: (normalizedQuery: string, collection?: string) => MerchRule | null;
 }
 
@@ -44,13 +47,15 @@ export const DEFAULT_FILTERS: FilterConfigLite[] = [
   { source: "option:Color", label: "Color", displayAs: "swatch", position: 3, enabled: true },
   { source: "option:Size", label: "Size", displayAs: "list", position: 4, enabled: true },
   { source: "tag", label: "Tag", displayAs: "checkbox", position: 5, enabled: false },
+  { source: "availability", label: "Availability", displayAs: "checkbox", position: 6, enabled: false },
+  { source: "collection", label: "Collection", displayAs: "checkbox", position: 7, enabled: false },
 ];
 
 export async function getShopConfig(shopId: string): Promise<ShopConfig> {
   const cached = cache.get(shopId);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.cfg;
 
-  const [synonyms, redirects, rules, filters] = await Promise.all([
+  const [synonyms, redirects, rules, filters, collections] = await Promise.all([
     prisma.synonym.findMany({ where: { shopId } }),
     prisma.redirect.findMany({ where: { shopId, active: true } }),
     prisma.merchandisingRule.findMany({
@@ -60,6 +65,10 @@ export async function getShopConfig(shopId: string): Promise<ShopConfig> {
     prisma.filterConfig.findMany({
       where: { shopId },
       orderBy: { position: "asc" },
+    }),
+    prisma.collection.findMany({
+      where: { shopId },
+      select: { handle: true, title: true },
     }),
   ]);
 
@@ -90,6 +99,7 @@ export async function getShopConfig(shopId: string): Promise<ShopConfig> {
           enabled: f.enabled,
         }))
       : DEFAULT_FILTERS,
+    collectionTitles: new Map(collections.map((c) => [c.handle, c.title])),
     matchRule(normalizedQuery: string, collection?: string) {
       // Highest-priority rule whose trigger(s) match. Null triggers are wildcards.
       for (const r of this.rules) {

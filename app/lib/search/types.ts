@@ -34,6 +34,8 @@ export interface SearchQuery {
   facetsOnly?: boolean;
   // Include out-of-stock products in results
   includeUnavailable?: boolean;
+  // Merchant toggle: when false, fuzzy/trigram matching is skipped (exact only).
+  typoTolerance?: boolean;
 }
 
 export interface ProductHit {
@@ -91,6 +93,8 @@ export interface AutocompleteQuery {
   shopId: string;
   term: string;
   limit: number;
+  includeUnavailable?: boolean;
+  typoTolerance?: boolean;
 }
 
 export interface CollectionHit {
@@ -110,6 +114,9 @@ export interface AutocompleteResult {
   suggestions: string[]; // query completions
   collections: CollectionHit[];
   pages: PageHit[];
+  // Set when the typed term matches a merchant redirect, so the dropdown can
+  // offer/perform the jump instead of showing an empty product list.
+  redirect?: string;
 }
 
 export interface SearchEngine {
