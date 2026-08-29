@@ -8,7 +8,13 @@ import {
   proxyBase,
   escapeLiquidHtml as esc,
 } from "../lib/proxy.server";
-import type { SortKey, FilterSelection, ProductHit, Facet } from "../lib/search/types";
+import type {
+  SortKey,
+  FilterSelection,
+  PriceRange,
+  ProductHit,
+  Facet,
+} from "../lib/search/types";
 
 // GET apps/anotherdev-search/results?q=...
 // Returns Liquid that Shopify renders INSIDE the merchant's theme, so the search
@@ -59,8 +65,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const cards = result.hits.map((h) => productCard(h, settings.showVendor)).join("\n");
   const jsonLd = buildItemListJsonLd(term, result.hits, session.shop, page, perPage);
-  const pagination = buildPagination(url, base, page, totalPages);
-  const facetNav = buildFacetLinks(url, base, result.facets, filters);
+  // Every link on this page is built from this, never from request.url.
+  const linkParams = shopperParams({ term, sort, filters, price, collection });
+  const pagination = buildPagination(linkParams, base, page, totalPages);
+  const facetNav = buildFacetLinks(linkParams, base, result.facets, filters);
 
   // Faceted URLs are near-infinite and near-duplicate. Let Google index the
   // clean query page and keep the filter permutations out of the index, or the
@@ -93,8 +101,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   var r=document.createElement("meta"); r.name="robots"; r.content=${JSON.stringify(robots)};
   var oldR=head.querySelector('meta[name="robots"]'); if(oldR) oldR.remove();
   head.appendChild(r);
-  ${page > 1 ? `var pv=document.createElement("link"); pv.rel="prev"; pv.href=${JSON.stringify(pageUrl(url, base, page - 1))}; head.appendChild(pv);` : ""}
-  ${page < totalPages ? `var nx=document.createElement("link"); nx.rel="next"; nx.href=${JSON.stringify(pageUrl(url, base, page + 1))}; head.appendChild(nx);` : ""}
+  ${page > 1 ? `var pv=document.createElement("link"); pv.rel="prev"; pv.href=${JSON.stringify(pageUrl(linkParams, base, page - 1))}; head.appendChild(pv);` : ""}
+  ${page < totalPages ? `var nx=document.createElement("link"); nx.rel="next"; nx.href=${JSON.stringify(pageUrl(linkParams, base, page + 1))}; head.appendChild(nx);` : ""}
 }catch(e){}})();
 </script>`;
 
@@ -137,6 +145,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return liquid(body);
 }
 
+/**
+ * The shopper-facing query string.
+ *
+ * Links MUST be built from the parsed search state, never by cloning
+ * `request.url`. Shopify appends `shop`, `path_prefix`, `timestamp`,
+ * `signature` and `logged_in_customer_id` to every App Proxy request, so
+ * copying that URL put a one-time HMAC and the logged-in customer id into
+ * crawlable hrefs — and sent a duplicate `signature` back through the proxy
+ * on the next click, which fails signature validation.
+ */
+function shopperParams(q: {
+  term: string;
+  sort: SortKey;
+  filters: FilterSelection;
+  price?: PriceRange;
+  collection?: string;
+}): URLSearchParams {
+  const sp = new URLSearchParams();
+  if (q.term) sp.set("q", q.term);
+  if (q.sort && q.sort !== "relevance") sp.set("sort", q.sort);
+  if (q.collection) sp.set("collection", q.collection);
+  if (q.price?.min != null) sp.set("price.min", String(q.price.min));
+  if (q.price?.max != null) sp.set("price.max", String(q.price.max));
+  // Sorted so one selection always yields one URL — otherwise two spellings
+  // of the same filtered page compete for the same content in the index.
+  for (const source of Object.keys(q.filters).sort()) {
+    for (const value of q.filters[source]) sp.append(`f.${source}`, value);
+  }
+  return sp;
+}
+
+/** `?a=1&b=2`, or "" — never a bare "?". */
+function qs(sp: URLSearchParams): string {
+  const out = sp.toString();
+  return out ? `?${out}` : "";
+}
+
 function productCard(p: ProductHit, showVendor: boolean): string {
   const priceText = formatPriceRange(p);
   const img = p.imageUrl
@@ -162,7 +207,7 @@ function productCard(p: ProductHit, showVendor: boolean): string {
  * for discovery, absent from the index.
  */
 function buildFacetLinks(
-  url: URL,
+  params: URLSearchParams,
   base: string,
   facets: Facet[],
   active: FilterSelection,
@@ -175,15 +220,16 @@ function buildFacetLinks(
         .slice(0, 12)
         .map((v) => {
           const selected = (active[f.source] ?? []).includes(v.value);
-          const u = new URL(url);
-          u.searchParams.delete("page");
-          const current = u.searchParams.getAll(`f.${f.source}`);
-          u.searchParams.delete(`f.${f.source}`);
+          const sp = new URLSearchParams(params);
+          // Toggling a facet always returns to page 1.
+          sp.delete("page");
+          const current = sp.getAll(`f.${f.source}`);
+          sp.delete(`f.${f.source}`);
           const next = selected
             ? current.filter((c) => c !== v.value)
             : [...current, v.value];
-          next.forEach((n) => u.searchParams.append(`f.${f.source}`, n));
-          const href = `${base}/results${u.search}`;
+          next.forEach((n) => sp.append(`f.${f.source}`, n));
+          const href = `${base}/results${qs(sp)}`;
           return `<a href="${esc(href)}" rel="nofollow" aria-pressed="${selected}">${esc(v.label)} (${v.count})</a>`;
         })
         .join("");
@@ -193,10 +239,12 @@ function buildFacetLinks(
   return groups ? `<nav aria-label="Filters">${groups}</nav>` : "";
 }
 
-function pageUrl(url: URL, base: string, p: number): string {
-  const u = new URL(url);
-  u.searchParams.set("page", String(p));
-  return `${base}/results${u.search}`;
+function pageUrl(params: URLSearchParams, base: string, p: number): string {
+  const sp = new URLSearchParams(params);
+  // Page 1 is the canonical, parameterless form.
+  if (p > 1) sp.set("page", String(p));
+  else sp.delete("page");
+  return `${base}/results${qs(sp)}`;
 }
 
 function buildItemListJsonLd(
@@ -241,14 +289,14 @@ function buildItemListJsonLd(
 }
 
 function buildPagination(
-  url: URL,
+  params: URLSearchParams,
   base: string,
   page: number,
   totalPages: number,
 ): string {
   if (totalPages <= 1) return "";
   const mk = (p: number, label?: string, current = false) => {
-    const path = pageUrl(url, base, p);
+    const path = pageUrl(params, base, p);
     if (current) return `<span aria-current="page">${label ?? p}</span>`;
     const rel = p === page - 1 ? ' rel="prev"' : p === page + 1 ? ' rel="next"' : "";
     return `<a href="${esc(path)}"${rel}>${label ?? p}</a>`;

@@ -7,7 +7,7 @@ import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { resolveSettings, mergeSettings } from "../lib/settings";
 import { getPlanStatus } from "../lib/billing.server";
-import { isSemanticEnabled } from "../lib/search/embeddings.server";
+import { semanticReady } from "../lib/search/embeddings.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -18,9 +18,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     settings: resolveSettings(shop.settings),
     domain: shop.domain,
     isPro,
-    // Semantic search needs an embeddings provider configured on the server;
-    // without one the toggle would be a switch wired to nothing.
-    semanticAvailable: isSemanticEnabled(),
+    // Semantic search needs BOTH an embeddings provider configured on the server
+    // and the pgvector column in Postgres; without either the toggle would be a
+    // switch wired to nothing.
+    semanticAvailable: await semanticReady(),
   };
 };
 

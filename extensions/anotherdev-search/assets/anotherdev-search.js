@@ -1145,6 +1145,49 @@
   //  5. Page takeover — /search and collection pages
   // =======================================================================
 
+  // Markets and locales prefix the path (/en-gb/search, /fr-ca/collections/x),
+  // so an anchored "^/search" matched nothing on any internationalised store
+  // and takeover silently never ran there.
+  var LOCALE = "(?:/[a-z]{2}(?:-[a-z0-9]{2,})?)?";
+  var SEARCH_PATH_RE = new RegExp("^" + LOCALE + "/search\\b", "i");
+  var COLLECTION_PATH_RE = new RegExp("^" + LOCALE + "/collections/[^/]+/?$", "i");
+
+  // Where themes put the product grid on search / collection templates, most
+  // specific first. Dawn and the OS 2.0 family use the first few.
+  var GRID_SELECTORS = [
+    "[data-adsf-collection-mount]",
+    "#ProductGridContainer",
+    "#product-grid",
+    "[id^='product-grid']",
+    "#main-collection-product-grid",
+    ".collection__products",
+    ".collection-grid",
+    "ul.product-grid",
+    "#search-results",
+    ".search__results",
+  ];
+
+  /**
+   * The narrowest node we can replace without destroying the rest of the page.
+   *
+   * Emptying #MainContent took the collection banner, description, breadcrumbs
+   * and every other section on the template with it. The theme SECTION wrapping
+   * the product grid is the right unit: on OS 2.0 themes it holds the grid plus
+   * the theme's own facet/sort bar, and nothing else.
+   */
+  function findGridHost() {
+    for (var i = 0; i < GRID_SELECTORS.length; i++) {
+      var node = document.querySelector(GRID_SELECTORS[i]);
+      if (!node) continue;
+      // An explicit merchant mount point is already the exact target.
+      if (node.getAttribute("data-adsf-collection-mount") != null) return node;
+      return (
+        node.closest(".shopify-section, [id^='shopify-section'], section") || node
+      );
+    }
+    return null;
+  }
+
   /**
    * Replace the theme's own search results with ours.
    *
@@ -1153,10 +1196,14 @@
    * landed on the theme's basic results page — the exact page this app replaces.
    */
   function takeoverSearchPage(cfg) {
-    if (!/^\/search\b/.test(location.pathname)) return false;
+    if (!SEARCH_PATH_RE.test(location.pathname)) return false;
     if (document.querySelector("[data-adsf-results-app]")) return false; // block already present
 
+    // On /search the whole page IS the results, so the main container is a
+    // defensible fallback when no grid is recognisable (a zero-result page may
+    // not render one). Collection pages get no such fallback.
     var host =
+      findGridHost() ||
       document.querySelector("#MainContent main") ||
       document.querySelector("#MainContent") ||
       document.querySelector("main") ||
@@ -1190,22 +1237,25 @@
    * the block's settings, which cannot work on a shared collection template.
    */
   function takeoverCollectionPage(cfg) {
-    if (!/^\/collections\/[^/]+\/?$/.test(location.pathname)) return false;
+    if (!COLLECTION_PATH_RE.test(location.pathname)) return false;
     if (document.querySelector("[data-adsf-results-app]")) return false;
 
+    // Read the handle out of the path rather than by segment index, which was
+    // off by one on any locale-prefixed URL (/en-gb/collections/summer).
+    var fromPath = location.pathname.match(/\/collections\/([^/?#]+)/);
     var handle =
       (window.ShopifyAnalytics &&
         window.ShopifyAnalytics.meta &&
         window.ShopifyAnalytics.meta.page &&
         window.ShopifyAnalytics.meta.page.resourceType === "collection" &&
         window.ShopifyAnalytics.meta.page.handle) ||
-      decodeURIComponent(location.pathname.split("/")[2] || "");
+      decodeURIComponent((fromPath && fromPath[1]) || "");
     if (!handle) return false;
 
-    var host =
-      document.querySelector("[data-adsf-collection-mount]") ||
-      document.querySelector("#MainContent main") ||
-      document.querySelector("#MainContent");
+    // Only ever replace the grid section. If this theme lays its collection out
+    // in a way we do not recognise, leave the page completely alone — silently
+    // rendering nothing beats deleting the merchant's content.
+    var host = findGridHost();
     if (!host) return false;
 
     var mount = el("div", "adsf-app");
@@ -1267,7 +1317,13 @@
     cfg.showVendor = !!s.showVendor;
     cfg.quickAdd = !!s.quickAdd;
     cfg.swatches = s.swatches || {};
-    if (s.proxy) cfg.proxy = s.proxy;
+    if (s.proxy) {
+      cfg.proxy = s.proxy;
+      // resultsUrl is DERIVED from the proxy base. The app embed hardcodes the
+      // default subpath, so a merchant who changed it got working autocomplete
+      // and a 404 from both "See all results" and the Enter key.
+      cfg.resultsUrl = s.proxy.replace(/\/+$/, "") + "/results";
+    }
     // Appearance → CSS variables
     var rs = document.documentElement.style;
     if (s.accentColor) rs.setProperty("--adsf-accent", s.accentColor);

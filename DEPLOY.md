@@ -49,7 +49,8 @@ curl -I https://anotherdev-search.fly.dev/
 ```
 
 ### 6. Point Shopify at the permanent URL
-Edit `shopify.app.toml` — set all three to your Fly URL:
+`shopify.app.toml` is already set to the Fly URL below. If you renamed the Fly
+app in step 2, update all three to match:
 ```toml
 application_url = "https://anotherdev-search.fly.dev"
 [auth]

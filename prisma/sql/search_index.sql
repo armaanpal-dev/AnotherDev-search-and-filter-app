@@ -38,17 +38,51 @@ $$ SELECT array_to_string($1, ' ') $$;
 -- SKUs sit at weight A deliberately: someone typing a SKU wants that exact
 -- product first, and staff searching the storefront use SKUs constantly.
 -- Generated column keeps it always in sync with no app-side maintenance.
-ALTER TABLE "Product" DROP COLUMN IF EXISTS "searchVector";
-ALTER TABLE "Product" ADD COLUMN "searchVector" tsvector
-  GENERATED ALWAYS AS (
-    setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("title", ''))), 'A') ||
-    setweight(to_tsvector('simple', ad_immutable_unaccent(ad_immutable_array_to_string("skus"))), 'A') ||
-    setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("vendor", ''))), 'B') ||
-    setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("productType", ''))), 'B') ||
-    setweight(to_tsvector('simple', ad_immutable_unaccent(ad_immutable_array_to_string("tags"))), 'B') ||
-    setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("variantText", ''))), 'B') ||
-    setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("description", ''))), 'C')
-  ) STORED;
+-- Rebuilt ONLY when it is missing or out of date. Dropping and re-adding a
+-- STORED generated column rewrites the whole table and reindexes the GIN index,
+-- so doing it unconditionally made every run of this script an O(catalog)
+-- operation — fine once, painful on a large catalog and unacceptable if this
+-- were ever wired into a deploy's release command.
+DO $$
+DECLARE
+  expr text;
+  -- Every column the vector must reference. A stored definition missing any of
+  -- them predates the current schema and has to be rebuilt.
+  markers text[] := ARRAY['title', 'skus', 'vendor', 'productType',
+                          'tags', 'variantText', 'description'];
+  marker text;
+  stale boolean := false;
+BEGIN
+  SELECT generation_expression INTO expr
+  FROM information_schema.columns
+  WHERE table_name = 'Product' AND column_name = 'searchVector';
+
+  IF expr IS NULL THEN
+    stale := true;                       -- column absent entirely
+  ELSE
+    FOREACH marker IN ARRAY markers LOOP
+      IF position(marker IN expr) = 0 THEN
+        stale := true;
+      END IF;
+    END LOOP;
+  END IF;
+
+  IF stale THEN
+    RAISE NOTICE 'Rebuilding Product.searchVector (missing or out of date).';
+    ALTER TABLE "Product" DROP COLUMN IF EXISTS "searchVector";
+    ALTER TABLE "Product" ADD COLUMN "searchVector" tsvector
+      GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("title", ''))), 'A') ||
+        setweight(to_tsvector('simple', ad_immutable_unaccent(ad_immutable_array_to_string("skus"))), 'A') ||
+        setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("vendor", ''))), 'B') ||
+        setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("productType", ''))), 'B') ||
+        setweight(to_tsvector('simple', ad_immutable_unaccent(ad_immutable_array_to_string("tags"))), 'B') ||
+        setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("variantText", ''))), 'B') ||
+        setweight(to_tsvector('simple', ad_immutable_unaccent(coalesce("description", ''))), 'C')
+      ) STORED;
+  END IF;
+END
+$$;
 
 CREATE INDEX IF NOT EXISTS product_search_vector_idx
   ON "Product" USING GIN ("searchVector");

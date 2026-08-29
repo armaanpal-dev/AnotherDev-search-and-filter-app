@@ -11,8 +11,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = await getShopByDomain(session.shop);
   const { isPro } = await getPlanStatus(billing);
 
+  // Deep link into the theme editor with our app embed already switched on, so
+  // step 2 is one click instead of a hunt through Theme settings. Shopify's
+  // documented shape is {api_key}/{block handle}, where the handle is the
+  // filename of the block's Liquid file (blocks/app-embed.liquid).
+  const themeEditorUrl =
+    `https://${session.shop}/admin/themes/current/editor` +
+    `?context=apps&activateAppId=${process.env.SHOPIFY_API_KEY}/app-embed`;
+
   if (!shop) {
-    return { productCount: 0, synced: false, searches7d: 0, zeroCount: 0, isPro };
+    return {
+      productCount: 0,
+      synced: false,
+      searches7d: 0,
+      zeroCount: 0,
+      isPro,
+      themeEditorUrl,
+    };
   }
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -29,6 +44,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     searches7d,
     zeroCount,
     isPro,
+    themeEditorUrl,
   };
 };
 
@@ -82,8 +98,12 @@ export default function Dashboard() {
           </s-list-item>
           <s-list-item>
             <s-text type="strong">Turn the app on in your theme.</s-text>{" "}
-            In your store: <s-text type="strong">Online Store → Themes → Customize → App embeds</s-text>,
-            then enable <s-text type="strong">AnotherDev Search</s-text>. That one switch upgrades
+            <s-link href={data.themeEditorUrl} target="_top">
+              Open the theme editor with the app embed switched on
+            </s-link>{" "}
+            — then click <s-text type="strong">Save</s-text>. (Manually:{" "}
+            <s-text type="strong">Online Store → Themes → Customize → App embeds</s-text>,
+            then enable <s-text type="strong">AnotherDev Search</s-text>.) That one switch upgrades
             your existing search box, replaces your search page with faceted results, and adds
             filters to collection pages — no blocks to place.
           </s-list-item>
@@ -92,7 +112,7 @@ export default function Dashboard() {
             In the theme editor click <s-text type="strong">Add section / Add block</s-text> and choose{" "}
             <s-text type="strong">AnotherDev Search Bar</s-text>,{" "}
             <s-text type="strong">AnotherDev Search Results</s-text>, or{" "}
-            <s-text type="strong">AnotherDev Recommendations</s-text> (a “you may also like” rail
+            <s-text type="strong">AnotherDev Recommended</s-text> (a “you may also like” rail
             for product pages). A block you place always wins over the automatic version.
           </s-list-item>
         </s-ordered-list>
@@ -130,7 +150,9 @@ export default function Dashboard() {
       <s-section slot="aside" heading="Not seeing it in your theme?">
         <s-paragraph>
           <s-text color="subdued">
-            First enable the app under <s-text type="strong">App embeds</s-text> (step 2 above).
+            First enable the app under <s-text type="strong">App embeds</s-text> (step 2 above) —
+            the <s-link href={data.themeEditorUrl} target="_top">theme editor link</s-link> takes
+            you straight there.
             If a block won’t drop into your header, your theme may only allow app blocks in the
             body — add the <s-text type="strong">Search Bar</s-text> block to a section that accepts
             blocks, or use the search on the results page.

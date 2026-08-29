@@ -6,13 +6,24 @@ import prisma from "../db.server";
 // app by an order of magnitude.
 const RETENTION_DAYS = Number(process.env.ANALYTICS_RETENTION_DAYS ?? 180);
 
+// `sessionToken` is the one pseudonymous per-shopper value this app stores, and
+// it earns its keep for exactly one thing: joining a click or add-to-cart back
+// to the search that produced it, inside a 2-hour attribution window. Reports
+// never group by it. So it is cleared a day later — long enough to absorb clock
+// skew and late beacons, short enough that the retained analytics carry no
+// per-shopper identifier at all.
+const SESSION_TOKEN_RETENTION_HOURS = Number(
+  process.env.ANALYTICS_SESSION_TOKEN_RETENTION_HOURS ?? 24,
+);
+
 // Pruning is cheap but pointless to repeat constantly; once a day per shop.
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Delete analytics beyond the retention window. Called opportunistically after a
- * catalog sync (the one recurring, already-backgrounded job this app has), and
- * safe to call as often as you like — it no-ops until the interval elapses.
+ * Delete analytics beyond the retention window, and strip session tokens from
+ * events past the attribution window. Called opportunistically after a catalog
+ * sync (the one recurring, already-backgrounded job this app has), and safe to
+ * call as often as you like — it no-ops until the interval elapses.
  */
 export async function pruneAnalytics(shopId: string): Promise<number> {
   const shop = await prisma.shop.findUnique({
@@ -26,6 +37,15 @@ export async function pruneAnalytics(shopId: string): Promise<number> {
   const { count } = await prisma.searchEvent.deleteMany({
     where: { shopId, createdAt: { lt: cutoff } },
   });
+
+  const tokenCutoff = new Date(
+    Date.now() - SESSION_TOKEN_RETENTION_HOURS * 60 * 60 * 1000,
+  );
+  await prisma.searchEvent.updateMany({
+    where: { shopId, createdAt: { lt: tokenCutoff }, sessionToken: { not: null } },
+    data: { sessionToken: null },
+  });
+
   await prisma.shop.update({
     where: { id: shopId },
     data: { analyticsPrunedAt: new Date() },

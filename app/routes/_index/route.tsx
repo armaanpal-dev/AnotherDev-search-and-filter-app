@@ -1,10 +1,15 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { redirect, Form, useLoaderData } from "react-router";
-
-import { login } from "../../shopify.server";
+import { redirect } from "react-router";
 
 import styles from "./styles.module.css";
 
+// Public marketing page for anyone who reaches the app URL directly.
+//
+// Deliberately has no "enter your shop domain" form: App Store apps must be
+// installed and opened from a Shopify-owned surface (the listing, or the app
+// card in the admin), and asking a merchant to type their .myshopify.com domain
+// is not permitted. A request that already carries `?shop=` came from Shopify,
+// so it goes straight into the embedded app and OAuth runs there.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
@@ -12,45 +17,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
-  return { showForm: Boolean(login) };
+  return null;
 };
 
-export default function App() {
-  const { showForm } = useLoaderData<typeof loader>();
+const LISTING_URL = "https://apps.shopify.com/anotherdev-search";
 
+export default function Index() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>AnotherDev Search &amp; Filters</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Fast, typo-tolerant search and faceted filters for your Shopify store —
+          so shoppers find the right product in fewer clicks.
         </p>
-        {showForm && (
-          <Form className={styles.form} method="post" action="/auth/login">
-            <label className={styles.label}>
-              <span>Shop domain</span>
-              <input className={styles.input} type="text" name="shop" />
-              <span>e.g: my-shop-domain.myshopify.com</span>
-            </label>
-            <button className={styles.button} type="submit">
-              Log in
-            </button>
-          </Form>
-        )}
+        <a className={styles.cta} href={LISTING_URL}>
+          Install from the Shopify App Store
+        </a>
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Instant search</strong>. Results appear as customers type,
+            across titles, SKUs, variants, tags and vendors, with typo tolerance
+            and synonyms you control.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Faceted filters</strong>. Price, brand, product type, colour,
+            size and tags on search and collection pages, as a sidebar on desktop
+            and a drawer on mobile.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Search analytics</strong>. Top searches, zero-result searches
+            and click-through rates, so you can see what shoppers want and where
+            search is failing them.
           </li>
         </ul>
+        <p className={styles.footnote}>
+          Installs as a theme app extension — no theme code changes. Read-only
+          access to your catalog; the app never writes to your store.
+        </p>
       </div>
     </div>
   );

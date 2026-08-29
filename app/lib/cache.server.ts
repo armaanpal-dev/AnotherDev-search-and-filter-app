@@ -56,8 +56,18 @@ export class TtlCache<V> {
 
   /** Memoise an async producer under `key`. Concurrent misses share one call. */
   async wrap(key: string, produce: () => Promise<V>): Promise<V> {
-    const hit = this.get(key);
-    if (hit !== undefined) return hit;
+    // Probe for PRESENCE, not for a non-undefined value: a legitimately cached
+    // `undefined` read as a miss and was recomputed on every single call.
+    const entry = this.store.get(key);
+    if (entry) {
+      if (Date.now() - entry.at <= this.ttlMs) {
+        // Refresh recency, same as get().
+        this.store.delete(key);
+        this.store.set(key, entry);
+        return entry.value;
+      }
+      this.store.delete(key);
+    }
 
     const inflight = this.pending.get(key);
     if (inflight) return inflight as Promise<V>;

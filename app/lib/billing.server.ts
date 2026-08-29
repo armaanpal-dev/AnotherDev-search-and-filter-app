@@ -23,6 +23,20 @@ export const PLAN_LIMITS = {
 
 export type PlanKey = keyof typeof PLAN_LIMITS;
 
+/**
+ * Whether charges are created in Shopify's test mode (approved in the admin but
+ * never billed). Inferring this from NODE_ENV alone is fragile: a production
+ * deploy that forgets to set NODE_ENV=production would quietly issue test
+ * charges and never take a payment. SHOPIFY_BILLING_TEST is the explicit
+ * override — set it to "false" in production and "true" on a dev store.
+ */
+export function isTestBilling(): boolean {
+  const explicit = process.env.SHOPIFY_BILLING_TEST;
+  if (explicit != null && explicit !== "") return explicit !== "false";
+  return process.env.NODE_ENV !== "production";
+}
+
+
 export interface PlanStatus {
   plan: PlanKey;
   isPro: boolean;
@@ -39,7 +53,7 @@ export async function getPlanStatus(billing: {
   try {
     const { hasActivePayment } = await billing.check({
       plans: [PRO_PLAN] as [typeof PRO_PLAN],
-      isTest: process.env.NODE_ENV !== "production",
+      isTest: isTestBilling(),
     });
     isPro = hasActivePayment;
   } catch {
