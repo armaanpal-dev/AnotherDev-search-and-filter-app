@@ -3,7 +3,7 @@
 client_id = "2bd4c8dfc90eafb9c76f96a56733c2cf"
 name = "Another Dev Search and Filter"
 handle = "anotherdev-search"
-application_url = "https://anotherdev-search.fly.dev"
+application_url = "https://anotherdev-search-production.up.railway.app"
 embedded = true
 
 [access_scopes]
@@ -13,7 +13,7 @@ optional_scopes = [ ]
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ "https://anotherdev-search.fly.dev/auth/callback" ]
+redirect_urls = [ "https://anotherdev-search-production.up.railway.app/auth/callback" ]
 
 [webhooks]
 api_version = "2025-10"
@@ -68,7 +68,7 @@ api_version = "2025-10"
 
 # Storefront search API served through an App Proxy on the merchant's own domain.
 [app_proxy]
-url = "https://anotherdev-search.fly.dev/proxy"
+url = "https://anotherdev-search-production.up.railway.app/proxy"
 subpath = "anotherdev-search"
 prefix = "apps"
 
