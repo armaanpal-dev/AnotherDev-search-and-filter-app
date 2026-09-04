@@ -1277,24 +1277,92 @@
     return { id: wrap.id.replace(/^shopify-section-/, ""), el: wrap };
   }
 
-  function initThemeGridFacets(cfg, handle, grid) {
+  /**
+   * How many products a rendered grid contains.
+   *
+   * Counted structurally rather than by class name: a product is commonly an
+   * <li class="grid__item"> wrapping a .card-wrapper, and a combined class
+   * selector counted the same product two or three times.
+   */
+  function countProducts(root) {
+    if (!root) return 0;
+    // Direct children holding a product link. Counting by class name matched
+    // nested wrappers and reported two or three per product.
+    var n = productChildCount(root);
+    if (n) return n;
+    // Some themes wrap the items one level deeper than the node we swapped.
+    for (var i = 0; i < root.children.length; i++) {
+      n = productChildCount(root.children[i]);
+      if (n > 1) return n;
+    }
+    return root.querySelectorAll(PRODUCT_LINK).length ? 1 : 0;
+  }
+
+  /**
+   * Hide the theme’s own filter UI, whatever it is called.
+   *
+   * The CSS list of known containers (.facets-container, #FacetFiltersForm …)
+   * only covers themes someone tested. Every theme that supports storefront
+   * filtering renders inputs named filter.*, so the smallest element wrapping
+   * those is the filter UI. Guarded so it can never hide the grid itself —
+   * that mistake is what made the search box disappear once already.
+   */
+  function hideThemeFacets(grid) {
+    var inputs = document.querySelectorAll('[name^="filter."]');
+    Array.prototype.forEach.call(inputs, function (input) {
+      var node = input.closest("form") || input.parentNode;
+      if (!node || node.nodeType !== 1) return;
+      if (node.hasAttribute && node.hasAttribute("data-adsf-themegrid")) return;
+      if (node.contains && grid && node.contains(grid)) return; // holds the products
+      if (node.querySelector && node.querySelector("[data-adsf-themegrid]")) return;
+      node.setAttribute("data-adsf-hidden-facets", "");
+    });
+  }
+
+  function initThemeGridFacets(cfg, handle, grid, preloadedFacets) {
     var section = sectionIdFor(grid);
     if (!section) return false;
 
-    var panel = el("div", "adsf-app adsf-app--filters-topbar adsf-themegrid");
+    // Honour the merchant's Filter layout choice instead of always going
+    // horizontal. "sidebar" wraps the theme's grid in two columns so the
+    // filters sit beside it, open, the way most storefronts present them.
+    var layout = cfg.filterLayout || "sidebar";
+    var panel = el(
+      "div",
+      "adsf-app adsf-themegrid adsf-app--filters-" + layout,
+    );
     panel.setAttribute("data-adsf-themegrid", "");
     panel.innerHTML =
       '<div class="adsf-app__topbar">' +
       '<button type="button" class="adsf-app__filter-toggle" data-adsf-filter-toggle aria-expanded="false">Filters</button>' +
       '<div class="adsf-app__meta" data-adsf-meta aria-live="polite"></div>' +
+      '<label class="adsf-app__sort"><span class="adsf-visually-hidden">Sort by</span>' +
+      '<select data-adsf-sort>' +
+      '<option value="">Featured</option>' +
+      '<option value="best-selling">Best selling</option>' +
+      '<option value="title-ascending">Alphabetically, A-Z</option>' +
+      '<option value="title-descending">Alphabetically, Z-A</option>' +
+      '<option value="price-ascending">Price, low to high</option>' +
+      '<option value="price-descending">Price, high to low</option>' +
+      '<option value="created-descending">Date, new to old</option>' +
+      '<option value="created-ascending">Date, old to new</option>' +
+      "</select></label>" +
       "</div>" +
       '<div class="adsf-app__chips" data-adsf-chips></div>' +
       '<aside class="adsf-facets" data-adsf-facets aria-label="Filters">' +
       '<div class="adsf-facets__inner" data-adsf-facets-inner></div></aside>';
-    // Directly above the grid, which sits inside the theme's page container.
-    // Inserting before the whole section put the bar outside that container,
-    // so it ran full-bleed while the grid stayed centred.
-    grid.parentNode.insertBefore(panel, grid);
+    // Mounted inside the theme's page container, next to the grid, so it
+    // inherits page width and padding. Inserting before the whole section
+    // put it outside that container and it ran full-bleed.
+    if (layout === "sidebar" || layout === "inline") {
+      // Wrap the grid so filters can sit in their own column beside it.
+      var shell = el("div", "adsf-themegrid__shell");
+      grid.parentNode.insertBefore(shell, grid);
+      shell.appendChild(panel);
+      shell.appendChild(grid);
+    } else {
+      grid.parentNode.insertBefore(panel, grid);
+    }
     document.body.classList.add("adsf-collection-active");
 
     var facetsInner = panel.querySelector("[data-adsf-facets-inner]");
@@ -1344,14 +1412,18 @@
           if (meta) {
             // The theme knows the real filtered count; ours only knows the
             // unfiltered one, so read it back rather than assert a number.
-            var n = fresh ? fresh.querySelectorAll("li, .grid__item, .card-wrapper").length : 0;
-            if (n) meta.textContent = n + " product" + (n === 1 ? "" : "s");
+            var n = countProducts(fresh);
+            meta.textContent = n + " product" + (n === 1 ? "" : "s");
           }
         })
         .catch(function () { grid.setAttribute("aria-busy", "false"); });
     }
 
     function loadFacets() {
+      if (preloadedFacets) {
+        renderFacetList(preloadedFacets);
+        return;
+      }
       var q =
         cfg.proxy +
         "/search?perPage=1" +
@@ -1494,6 +1566,17 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") closeAllPops();
     });
+    var sortSel = panel.querySelector("[data-adsf-sort]");
+    if (sortSel) {
+      // Seed from the URL so a sorted page survives a reload.
+      sortSel.value = current.get("sort_by") || "";
+      state.sort = sortSel.value;
+      sortSel.addEventListener("change", function () {
+        state.sort = sortSel.value;
+        renderTheme();
+      });
+    }
+
     var toggle = panel.querySelector("[data-adsf-filter-toggle]");
     var facetsEl = panel.querySelector("[data-adsf-facets]");
     if (toggle && facetsEl) {
@@ -1534,6 +1617,58 @@
     ".search__results",
   ];
 
+  var PRODUCT_LINK = 'a[href*="/products/"]';
+
+  /** Does this element contain (or is it) a link to a product page? */
+  function holdsProduct(node) {
+    if (!node || node.nodeType !== 1) return false;
+    if (node.matches && node.matches(PRODUCT_LINK)) return true;
+    return !!(node.querySelector && node.querySelector(PRODUCT_LINK));
+  }
+
+  /** How many direct children of `node` are separate products. */
+  function productChildCount(node) {
+    if (!node || !node.children) return 0;
+    var n = 0;
+    for (var i = 0; i < node.children.length; i++) {
+      if (holdsProduct(node.children[i])) n++;
+    }
+    return n;
+  }
+
+  /**
+   * Find the product grid without knowing the theme.
+   *
+   * A named-selector list only ever covers the themes someone thought to add,
+   * and every other shop silently gets no filters at all. Structure is the same
+   * everywhere though: a grid is the element with the most direct children that
+   * each contain a product link. Walk up from the product links and keep the
+   * best candidate.
+   */
+  function detectGrid(scopeEl) {
+    var links = (scopeEl || document).querySelectorAll(PRODUCT_LINK);
+    if (links.length < 2) return null;
+    var best = null;
+    var bestCount = 1;
+    var seen = [];
+    Array.prototype.forEach.call(links, function (a) {
+      var node = a;
+      while (node && node.parentNode && node.parentNode.nodeType === 1) {
+        var parent = node.parentNode;
+        if (parent === document.body || parent === document.documentElement) break;
+        if (seen.indexOf(parent) < 0) {
+          seen.push(parent);
+          var count = productChildCount(parent);
+          // Prefer the container holding the most products. Ties go to the
+          // deepest one, which is the grid rather than a page wrapper.
+          if (count > bestCount) { best = parent; bestCount = count; }
+        }
+        node = parent;
+      }
+    });
+    return best;
+  }
+
   /**
    * The grid container, and nothing above it.
    *
@@ -1549,9 +1684,17 @@
   function findGridHost() {
     for (var i = 0; i < GRID_SELECTORS.length; i++) {
       var node = document.querySelector(GRID_SELECTORS[i]);
-      if (node) return node;
+      // A named match still has to look like a grid: some themes reuse these
+      // class names on a single-product block.
+      if (node && productChildCount(node) >= 2) return node;
     }
-    return null;
+    // Nothing recognised: work it out from the page structure instead.
+    var main =
+      document.querySelector("#MainContent") ||
+      document.querySelector("main") ||
+      document.querySelector('[role="main"]') ||
+      document.body;
+    return detectGrid(main);
   }
 
   /**
@@ -1626,11 +1769,7 @@
     var host = findGridHost();
     if (!host) return false;
 
-    // The theme always draws collection product cards; we only add filters.
-    // Falls through to our own grid if the theme has no addressable section.
-    {
-      if (initThemeGridFacets(cfg, scope, host)) return true;
-    }
+
 
     // Ask before replacing anything.
     //
@@ -1647,6 +1786,26 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || !d.total) return;
+
+        // Which path can serve this collection?
+        //
+        // Theme cards are better looking, but they can only be filtered through
+        // Shopify’s native params, and those are ignored unless the merchant
+        // enabled the matching filter under Storefront filters. Rather than
+        // show a filter that silently does nothing, we check first: if every
+        // configured facet is supported natively, the theme draws the cards; if
+        // even one is not, we draw the grid ourselves so that ALL of them work.
+        var supported = themeFilterParams();
+        var wanted = (d.facets || []).filter(function (fc) {
+          return paramForSource(fc.source);
+        });
+        var missing = supported
+          ? wanted.filter(function (fc) { return !supported[paramForSource(fc.source)]; })
+          : wanted; // theme exposes no filters at all
+        if (!missing.length && wanted.length) {
+          if (initThemeGridFacets(cfg, scope, host, d.facets)) return;
+        }
+
         var mount = el("div", "adsf-app");
         mount.setAttribute("data-adsf-results-app", "");
         mount.setAttribute("data-proxy", cfg.proxy);
@@ -1660,6 +1819,7 @@
         // The theme's own facet form now drives a grid that is gone. Hide it
         // rather than delete it.
         document.body.classList.add("adsf-collection-active");
+        hideThemeFacets(host);
         initResultsApp(mount, cfg);
       })
       .catch(function () {
@@ -1705,6 +1865,12 @@
     cfg.panelStyle = s.panelStyle || cfg.panelStyle || "dropdown";
     cfg.layout = s.layout || "rich";
     cfg.previewSide = s.previewSide || "left";
+    cfg.mode = s.mode || "both";
+    // The mode decides which halves may run; the individual switches then
+    // tune the half that is on. A switch can never re-enable a half the
+    // merchant turned off.
+    cfg.searchOn = cfg.mode !== "filters";
+    cfg.filtersOn = cfg.mode !== "search";
     cfg.autoAttach = s.autoAttach !== false;
     cfg.searchTakeover = s.searchTakeover !== false;
     cfg.collectionFilters = s.collectionFilters !== false;
@@ -1757,6 +1923,9 @@
       panelStyle: "spotlight",
       layout: "rich",
       previewSide: "left",
+      mode: "both",
+      searchOn: true,
+      filtersOn: true,
       autoAttach: g.autoAttach !== false,
       searchTakeover: true,
       collectionFilters: true,
@@ -1781,9 +1950,11 @@
       });
 
       if (window.ADSF_CONFIG) {
-        if (cfg.searchTakeover) takeoverSearchPage(cfg);
-        if (cfg.collectionFilters) takeoverCollectionPage(cfg);
-        if (cfg.autoAttach) {
+        if (cfg.searchOn !== false && cfg.searchTakeover) takeoverSearchPage(cfg);
+        if (cfg.filtersOn !== false && cfg.collectionFilters) {
+          takeoverCollectionPage(cfg);
+        }
+        if (cfg.searchOn !== false && cfg.autoAttach) {
           autoAttachSearch(cfg);
           setTimeout(function () { autoAttachSearch(cfg); }, 1200);
         }

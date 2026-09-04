@@ -105,6 +105,11 @@ body.adsf-active .search-drawer__results { display: none !important; }
    Facet CONTAINERS only, never an ancestor that could hold the grid: this is
    the same mistake that made <predictive-search> disappear along with the
    search box. Hiding is also reversible, unlike removing nodes. */
+/* The script tags the theme's own filter UI structurally (by the filter.*
+   inputs it renders) and this hides whatever it tagged. The old list of class
+   names only covered themes we had seen. The named selectors stay as a cheap
+   fast path for the common ones. */
+[data-adsf-hidden-facets],
 body.adsf-collection-active facet-filters-form,
 body.adsf-collection-active #FacetFiltersForm,
 body.adsf-collection-active #FacetFiltersFormMobile,
@@ -214,6 +219,44 @@ body.adsf-collection-active .collection__filters { display: none !important; }
    it inherits page width and padding. Type and colour are inherited too; the
    only opinion here is spacing and a rule to separate it from the products. */
 .adsf-themegrid { margin: 0 0 1.5rem; font: inherit; color: inherit; }
+
+/* Sidebar layout over the theme grid: our column, then the products. The
+   grid keeps its own column count, so the theme still controls how its
+   cards lay out inside the narrower space. */
+.adsf-themegrid__shell {
+  display: grid; grid-template-columns: 240px minmax(0, 1fr);
+  gap: 1.75rem; align-items: start;
+}
+.adsf-themegrid__shell > .adsf-themegrid { margin: 0; }
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-facets__inner,
+.adsf-app--filters-inline.adsf-themegrid .adsf-facets__inner {
+  flex-direction: column; align-items: stretch; gap: 0.75rem;
+  border: 0; padding: 0;
+}
+/* Open by default in a sidebar: a dropdown inside a column is pointless. */
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__pop,
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd__pop {
+  position: static; display: block; min-width: 0; max-height: none;
+  border: 0; box-shadow: none; padding: 0.35rem 0 0.75rem; background: none;
+}
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn,
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn {
+  width: 100%; justify-content: space-between;
+  border: 0; border-radius: 0; padding: 0.35rem 0;
+  background: none; font-weight: 600;
+}
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn:hover,
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn:hover { background: none; }
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd,
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding-bottom: 0.5rem;
+}
+
+@media (max-width: 749px) {
+  /* One column on a phone; the toggle button brings the filters back. */
+  .adsf-themegrid__shell { grid-template-columns: 1fr; gap: 1rem; }
+}
 .adsf-themegrid .adsf-app__topbar { padding: 0 0 0.5rem; }
 /* Dropdown filter buttons. Colours are variables so the merchant can set them
    in the app; each falls back to the theme rather than a hardcoded palette. */

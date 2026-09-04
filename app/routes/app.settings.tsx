@@ -51,6 +51,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // reset the missing ones (resultsPerPage, gridColumns, showVendor,
   // recentSearches, collectionFilters) to their defaults on every save.
   const settings = mergeSettings(shop.settings, {
+    mode: field("mode"),
     autoAttach: checkbox("autoAttach"),
     searchTakeover: checkbox("searchTakeover"),
     showRecommendations: checkbox("showRecommendations"),
@@ -162,6 +163,16 @@ export default function SettingsPage() {
         <s-stack direction="block" gap="large-500">
         <s-section heading="Behaviour">
           <s-stack direction="block" gap="base">
+            <s-select name="mode" label="What this app runs on your storefront" value={s.mode}>
+              <s-option value="both">Search and filters</s-option>
+              <s-option value="search">Search only</s-option>
+              <s-option value="filters">Filters only</s-option>
+            </s-select>
+            <s-text color="subdued">
+              The switches below only apply to the half you have turned on. A
+              block you placed by hand in the theme editor keeps working either
+              way, since placing it is already an explicit choice.
+            </s-text>
             <Check name="autoAttach" checked={s.autoAttach} label="Upgrade my theme's search box with instant results" />
             <Check name="searchTakeover" checked={s.searchTakeover} label="Use our results on the theme's /search page (recommended)" />
             <Check name="collectionFilters" checked={s.collectionFilters} label="Show filters and instant results on collection pages" />

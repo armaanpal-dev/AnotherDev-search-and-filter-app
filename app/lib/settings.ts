@@ -4,6 +4,19 @@
 // the theme editor) means merchants configure everything in one place.
 
 export interface WidgetSettings {
+  /**
+   * What the app does on the storefront at all.
+   *
+   * The three switches below (autoAttach, searchTakeover, collectionFilters)
+   * are fine-grained, but nothing said what the app was FOR. A merchant who
+   * only wants collection filters had to know that two unrelated-sounding
+   * toggles were the search half.
+   *
+   *   both     search and filters (default)
+   *   search   instant search only, collection pages untouched
+   *   filters  collection filters only, the theme keeps its own search
+   */
+  mode: "both" | "search" | "filters";
   // Behaviour
   autoAttach: boolean;          // upgrade the theme's own search box
   searchTakeover: boolean;      // hijack the theme's /search page with our results
@@ -49,6 +62,7 @@ export interface WidgetSettings {
 }
 
 export const DEFAULT_SETTINGS: WidgetSettings = {
+  mode: "both",
   autoAttach: true,
   searchTakeover: true,
   showRecommendations: true,
@@ -86,6 +100,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
 export function resolveSettings(stored: unknown): WidgetSettings {
   const s = (stored ?? {}) as Partial<WidgetSettings>;
   return {
+    mode: oneOf(s.mode, ["both", "search", "filters"], DEFAULT_SETTINGS.mode),
     autoAttach: bool(s.autoAttach, DEFAULT_SETTINGS.autoAttach),
     searchTakeover: bool(s.searchTakeover, DEFAULT_SETTINGS.searchTakeover),
     showRecommendations: bool(s.showRecommendations, DEFAULT_SETTINGS.showRecommendations),
