@@ -159,7 +159,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-facet__num { width: 72px; padding: 0.35rem 0.4rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; font: inherit; }
 .adsf-facet__apply { padding: 0.35rem 0.6rem; border: 0; border-radius: 6px; background: var(--adsf-accent, #111); color: #fff; cursor: pointer; }
 
-.adsf-grid { display: grid; grid-template-columns: repeat(var(--adsf-cols, 4), 1fr); gap: 1.25rem; min-height: 300px; }
+.adsf-grid { display: grid; grid-template-columns: repeat(var(--adsf-cols, 4), 1fr); gap: 1.25rem; min-height: 300px; align-items: stretch; }
 .adsf-grid[aria-busy="true"] { opacity: 0.5; }
 /* ---- Product cards ---------------------------------------------------
    These inherit the storefront rather than styling themselves. Font family,
@@ -169,13 +169,18 @@ body.adsf-collection-active .collection__filters { display: none !important; }
      --adsf-card-radius   corner radius on images (default: square)
      --adsf-card-ratio    image aspect ratio (default: 1/1)
      --adsf-card-placeholder  background behind a missing image */
-.adsf-card { position: relative; }
+/* A column so every card in a row lines up: image, then text, then the button
+   pushed to the bottom. Without this a card with Add to cart was taller than
+   one without, and a card with no image collapsed, so rows staggered. */
+.adsf-card { position: relative; display: flex; flex-direction: column; height: 100%; }
+.adsf-card > a { flex: 1 1 auto; }
+.adsf-card__add { margin-top: auto; }
 .adsf-card a { text-decoration: none; color: inherit; display: block; }
 .adsf-card__img, .adsf-card__noimg {
   width: 100%; display: block; object-fit: cover;
   aspect-ratio: var(--adsf-card-ratio, 1 / 1);
   border-radius: var(--adsf-card-radius, 0);
-  background: var(--adsf-card-placeholder, rgba(0, 0, 0, 0.04));
+  background: var(--adsf-card-placeholder, rgba(0, 0, 0, 0.06));
 }
 .adsf-card__title {
   margin: 0.5rem 0 0.25rem;

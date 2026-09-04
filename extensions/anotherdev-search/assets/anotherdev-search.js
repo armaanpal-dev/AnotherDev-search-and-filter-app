@@ -1193,6 +1193,193 @@
   }
 
   // =======================================================================
+  //  Collection facets over the THEME’s own grid
+  // =======================================================================
+  //
+  // Renders our facet UI and lets the theme keep rendering its product cards.
+  //
+  // How: facet values and counts come from our index, but a selection is
+  // expressed as Shopify’s native storefront filter params and handed back to
+  // the theme through the Section Rendering API. The theme re-renders its own
+  // section, with its own cards, in its own Liquid context.
+  //
+  // The trade-off is real: this path can only express what Shopify’s native
+  // filtering understands, and those params are ignored unless the merchant has
+  // enabled the matching filters under Storefront filters. It also cannot apply
+  // synonyms, typo tolerance or merchandising — none of which matter here,
+  // because a collection page has no search term to be relevant to.
+
+  // Our facet source -> Shopify storefront filter parameter.
+  function shopifyFilterParams(state) {
+    var sp = new URLSearchParams();
+    Object.keys(state.filters).forEach(function (source) {
+      (state.filters[source] || []).forEach(function (v) {
+        if (source === "vendor") sp.append("filter.p.vendor", v);
+        else if (source === "productType") sp.append("filter.p.product_type", v);
+        else if (source === "tag") sp.append("filter.p.tag", v);
+        else if (source === "availability") {
+          sp.append("filter.v.availability", v === "in_stock" ? "1" : "0");
+        } else if (source.indexOf("option:") === 0) {
+          sp.append("filter.v.option." + source.slice(7).toLowerCase(), v);
+        } else if (source.indexOf("metafield:") === 0) {
+          sp.append("filter.p.m." + source.slice(10), v);
+        }
+      });
+    });
+    if (state.priceMin) sp.set("filter.v.price.gte", state.priceMin);
+    if (state.priceMax) sp.set("filter.v.price.lte", state.priceMax);
+    if (state.sort) sp.set("sort_by", state.sort);
+    return sp;
+  }
+
+  // The theme section wrapping the grid, e.g. shopify-section-template--1__grid.
+  function sectionIdFor(node) {
+    var wrap = node && node.closest ? node.closest("[id^='shopify-section-']") : null;
+    if (!wrap) return null;
+    return { id: wrap.id.replace(/^shopify-section-/, ""), el: wrap };
+  }
+
+  function initThemeGridFacets(cfg, handle, grid) {
+    var section = sectionIdFor(grid);
+    if (!section) return false;
+
+    var panel = el("div", "adsf-app adsf-app--filters-topbar adsf-themegrid");
+    panel.setAttribute("data-adsf-themegrid", "");
+    panel.innerHTML =
+      '<div class="adsf-app__topbar">' +
+      '<button type="button" class="adsf-app__filter-toggle" data-adsf-filter-toggle aria-expanded="false">Filters</button>' +
+      '<div class="adsf-app__meta" data-adsf-meta aria-live="polite"></div>' +
+      "</div>" +
+      '<div class="adsf-app__chips" data-adsf-chips></div>' +
+      '<aside class="adsf-facets" data-adsf-facets aria-label="Filters">' +
+      '<div class="adsf-facets__inner" data-adsf-facets-inner></div></aside>';
+    section.el.parentNode.insertBefore(panel, section.el);
+    document.body.classList.add("adsf-collection-active");
+
+    var facetsInner = panel.querySelector("[data-adsf-facets-inner]");
+    var meta = panel.querySelector("[data-adsf-meta]");
+    var state = { filters: {}, priceMin: null, priceMax: null, sort: "" };
+
+    // Seed from the URL so a shared or reloaded filtered page stays filtered.
+    var current = new URLSearchParams(location.search);
+    current.forEach(function (v, k) {
+      if (k.indexOf("f.") === 0) {
+        var src = k.slice(2);
+        (state.filters[src] = state.filters[src] || []).push(v);
+      }
+    });
+    state.priceMin = current.get("price.min");
+    state.priceMax = current.get("price.max");
+
+    function renderTheme() {
+      var shop = shopifyFilterParams(state);
+      // Our own params go in the address bar so the facet state survives a
+      // reload; Shopify’s go to the section request.
+      var mine = new URLSearchParams();
+      Object.keys(state.filters).forEach(function (src) {
+        state.filters[src].forEach(function (v) { mine.append("f." + src, v); });
+      });
+      if (state.priceMin) mine.set("price.min", state.priceMin);
+      if (state.priceMax) mine.set("price.max", state.priceMax);
+      var merged = new URLSearchParams(shop.toString());
+      mine.forEach(function (v, k) { merged.append(k, v); });
+      history.replaceState(null, "", location.pathname + (merged.toString() ? "?" + merged : ""));
+
+      section.el.setAttribute("aria-busy", "true");
+      fetch(location.pathname + "?section_id=" + encodeURIComponent(section.id) + (shop.toString() ? "&" + shop : ""))
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          // The response is the section markup, wrapper included.
+          var tmp = document.createElement("div");
+          tmp.innerHTML = html;
+          var fresh = tmp.firstElementChild;
+          if (fresh) {
+            section.el.innerHTML = fresh.innerHTML;
+            grid = section.el.querySelector(GRID_SELECTORS.join(",")) || grid;
+          }
+          section.el.setAttribute("aria-busy", "false");
+        })
+        .catch(function () { section.el.setAttribute("aria-busy", "false"); });
+    }
+
+    function loadFacets() {
+      var q = cfg.proxy + "/search?perPage=1&collection=" + encodeURIComponent(handle);
+      fetch(q, { headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.facets) return;
+          if (meta) meta.textContent = d.total + " product" + (d.total === 1 ? "" : "s");
+          renderFacetList(d.facets);
+        })
+        .catch(function () {});
+    }
+
+    function renderFacetList(facets) {
+      facetsInner.innerHTML = "";
+      facets.forEach(function (fct) {
+        var group = el("div", "adsf-facet");
+        group.appendChild(el("h4", "adsf-facet__title", esc(fct.label)));
+        if (fct.displayAs === "range") {
+          var wrap = el("div", "adsf-facet__range");
+          var min = el("input", "adsf-facet__num"); min.type = "number";
+          min.placeholder = fct.min != null ? String(Math.floor(fct.min)) : "Min";
+          min.value = state.priceMin || "";
+          var max = el("input", "adsf-facet__num"); max.type = "number";
+          max.placeholder = fct.max != null ? String(Math.ceil(fct.max)) : "Max";
+          max.value = state.priceMax || "";
+          var go = el("button", "adsf-facet__apply", "Go"); go.type = "button";
+          go.addEventListener("click", function () {
+            state.priceMin = min.value || null;
+            state.priceMax = max.value || null;
+            renderTheme();
+          });
+          wrap.appendChild(min); wrap.appendChild(el("span", "adsf-facet__dash", "–"));
+          wrap.appendChild(max); wrap.appendChild(go);
+          group.appendChild(wrap);
+        } else {
+          var list = el("ul", "adsf-facet__list");
+          var selected = state.filters[fct.source] || [];
+          fct.values.forEach(function (v) {
+            var li = el("li", "adsf-facet__item");
+            var id = "adsfx_" + fct.source.replace(/[^a-z0-9]/gi, "") + "_" + String(v.value).replace(/[^a-z0-9]/gi, "");
+            var cb = el("input"); cb.type = "checkbox"; cb.id = id;
+            cb.checked = selected.indexOf(v.value) >= 0;
+            cb.addEventListener("change", function () {
+              var arr = state.filters[fct.source] || [];
+              if (cb.checked) { if (arr.indexOf(v.value) < 0) arr.push(v.value); }
+              else arr = arr.filter(function (x) { return x !== v.value; });
+              if (arr.length) state.filters[fct.source] = arr;
+              else delete state.filters[fct.source];
+              renderTheme();
+            });
+            var lbl = el("label");
+            lbl.setAttribute("for", id);
+            lbl.insertAdjacentHTML("beforeend",
+              '<span class="adsf-facet__label">' + esc(v.label) + '</span> <span class="adsf-facet__count">' + v.count + "</span>");
+            li.appendChild(cb); li.appendChild(lbl);
+            list.appendChild(li);
+          });
+          group.appendChild(list);
+        }
+        facetsInner.appendChild(group);
+      });
+    }
+
+    var toggle = panel.querySelector("[data-adsf-filter-toggle]");
+    var facetsEl = panel.querySelector("[data-adsf-facets]");
+    if (toggle && facetsEl) {
+      toggle.addEventListener("click", function () {
+        var open = !facetsEl.classList.contains("is-open");
+        facetsEl.classList.toggle("is-open", open);
+        toggle.setAttribute("aria-expanded", String(open));
+      });
+    }
+
+    loadFacets();
+    return true;
+  }
+
+  // =======================================================================
   //  5. Page takeover — /search and collection pages
   // =======================================================================
 
@@ -1304,11 +1491,17 @@
     // only ever return nothing. Treat it as an unscoped browse instead.
     var scope = handle === "all" ? "" : handle;
 
-    // Only ever replace the grid section. If this theme lays its collection out
-    // in a way we do not recognise, leave the page completely alone — silently
-    // rendering nothing beats deleting the merchant's content.
+    // Only ever touch the grid. If this theme lays its collection out in a way
+    // we do not recognise, leave the page completely alone: silently rendering
+    // nothing beats deleting the merchant's content.
     var host = findGridHost();
     if (!host) return false;
+
+    // Default path: keep the theme's product cards and only add our filters.
+    // Falls through to our own grid if the theme has no addressable section.
+    if ((cfg.collectionGrid || "theme") === "theme") {
+      if (initThemeGridFacets(cfg, scope || handle, host)) return true;
+    }
 
     // Ask before replacing anything.
     //
@@ -1387,6 +1580,7 @@
     cfg.searchTakeover = s.searchTakeover !== false;
     cfg.collectionFilters = s.collectionFilters !== false;
     cfg.filterLayout = s.filterLayout || "sidebar";
+    cfg.collectionGrid = s.collectionGrid || "theme";
     cfg.resultsPerPage = s.resultsPerPage || 24;
     cfg.gridColumns = s.gridColumns || 4;
     cfg.showVendor = !!s.showVendor;
@@ -1429,6 +1623,7 @@
       searchTakeover: true,
       collectionFilters: true,
       filterLayout: "sidebar",
+      collectionGrid: "theme",
       resultsPerPage: 24,
       gridColumns: 4,
       showVendor: false,
