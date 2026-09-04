@@ -96,10 +96,18 @@ body.adsf-active .predictive-search__results { display: none !important; }
 /* Spotlight panel style: dim the page behind so the panel never looks like it
    overlaps content. */
 .adsf-backdrop {
+  /* Decoration only. Without pointer-events:none this layer sat on top of
+     the search input and swallowed every click and keystroke, so the box
+     could not be typed into once the panel opened. */
+  pointer-events: none;
   position: fixed; inset: 0; z-index: 99999;
   background: rgba(17, 24, 39, 0.45);
   -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
 }
+/* Paired with .adsf-input-raised in the script: lifts the focused input out
+   of the dimmed layer where the theme allows it. */
+.adsf-input-raised { position: relative; z-index: 100001; }
+
 .adsf-dropdown--spotlight {
   max-width: 680px;
   border-radius: 16px;

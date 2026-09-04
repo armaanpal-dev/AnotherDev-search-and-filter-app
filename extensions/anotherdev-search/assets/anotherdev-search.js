@@ -1002,12 +1002,13 @@
       backdrop = el("div", "adsf-backdrop");
       backdrop.hidden = true;
       document.body.appendChild(backdrop);
-      backdrop.addEventListener("click", function () { ctx.close(); });
+      // No click handler: the backdrop is pointer-events:none so the input
+      // underneath stays usable. Clicking away is handled on document below.
     }
 
     var dropdown = el("div", "adsf-dropdown" + (spotlight ? " adsf-dropdown--spotlight" : ""));
     dropdown.hidden = true;
-    dropdown.style.position = "absolute";
+    dropdown.style.position = "fixed";
     dropdown.style.zIndex = "100000";
     document.body.appendChild(dropdown);
 
@@ -1018,27 +1019,36 @@
       ctx.items = [];
       ctx.activeIndex = -1;
       if (backdrop) backdrop.hidden = true;
+      input.classList.remove("adsf-input-raised");
       document.body.classList.remove("adsf-active");
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
     };
     bindCombobox(input, dropdown, ctx);
 
+    // Viewport coordinates only. Adding scrollX/scrollY to a fixed-position
+    // element would double-count the scroll offset and walk the panel off
+    // screen; with position:fixed the rect alone is already correct, and the
+    // scroll listener keeps it glued to a header that moves or reflows.
     function place() {
       var r = input.getBoundingClientRect();
       var isRich = dropdown.classList.contains("adsf-dropdown--rich");
       var w = isRich ? Math.min(640, window.innerWidth * 0.92) : Math.max(300, r.width);
       dropdown.style.width = w + "px";
-      var left = r.left + window.scrollX;
-      var maxLeft = window.scrollX + window.innerWidth - w - 8;
-      if (left > maxLeft) left = Math.max(window.scrollX + 8, maxLeft);
-      dropdown.style.left = left + "px";
-      dropdown.style.top = (r.bottom + window.scrollY + 6) + "px";
+      var left = Math.min(r.left, window.innerWidth - w - 8);
+      dropdown.style.left = Math.max(8, left) + "px";
+      dropdown.style.top = (r.bottom + 6) + "px";
+      // Never run past the bottom of the window; the panel scrolls instead.
+      dropdown.style.maxHeight = Math.max(220, window.innerHeight - r.bottom - 24) + "px";
     }
 
     function open() {
       if (backdrop) backdrop.hidden = false;
       dropdown.hidden = false;
+      // Best effort at lifting the input above the dim layer so it reads as
+      // focused. If an ancestor creates a stacking context this has no
+      // effect, which is why the backdrop is also pointer-events:none.
+      input.classList.add("adsf-input-raised");
       input.setAttribute("aria-expanded", "true");
       // Hide the theme's OWN predictive-search results so the two panels don't
       // stack/overlap (CSS in the stylesheet targets common theme containers).
