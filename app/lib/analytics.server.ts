@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { normalizeQuery } from "./search/normalize";
 
 // Raw events are kept a little beyond the longest plan window so a merchant
 // upgrading from Free to Pro immediately sees history rather than a blank chart.
@@ -51,6 +52,59 @@ export async function pruneAnalytics(shopId: string): Promise<number> {
     data: { analyticsPrunedAt: new Date() },
   });
   return count;
+}
+
+/**
+ * Record one committed search.
+ *
+ * Lives here rather than in a route because more than one surface is a real
+ * search: the JSON API the storefront widget calls, and the crawlable results
+ * page a shopper reaches by pressing Enter. Only the first of those used to
+ * record anything, which is why Analytics stayed empty no matter how much
+ * searching happened.
+ *
+ * Never throws: analytics must not be able to break search.
+ */
+export async function recordSearchEvent(input: {
+  shopId: string;
+  term: string;
+  resultsCount: number;
+  sessionToken?: string;
+}): Promise<void> {
+  try {
+    const normalized = normalizeQuery(input.term);
+    if (!normalized) return;
+
+    // Collapse repeats. A type-ahead submit can fire twice for one intent,
+    // and the results page is a plain URL that gets reloaded and crawled.
+    // With a session token this is per shopper; without one (the server
+    // rendered page has no token) it is per shop, which slightly under-counts
+    // two people searching the same word inside a minute but stops a refresh
+    // loop inventing traffic.
+    const since = new Date(Date.now() - 60_000);
+    const duplicate = await prisma.searchEvent.findFirst({
+      where: {
+        shopId: input.shopId,
+        normalized,
+        createdAt: { gte: since },
+        ...(input.sessionToken ? { sessionToken: input.sessionToken } : {}),
+      },
+      select: { id: true },
+    });
+    if (duplicate) return;
+
+    await prisma.searchEvent.create({
+      data: {
+        shopId: input.shopId,
+        query: input.term,
+        normalized,
+        resultsCount: input.resultsCount,
+        sessionToken: input.sessionToken,
+      },
+    });
+  } catch {
+    // Analytics must never break search.
+  }
 }
 
 export interface TopSearch {

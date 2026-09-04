@@ -94,6 +94,26 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(type === "click" ? {} : { converted: true }),
         },
       });
+    } else if (type === "click" && normalized) {
+      // No search to attach to.
+      //
+      // A shopper who types into the box and clicks a suggestion never hits
+      // the results page, so nothing recorded their search — and the click,
+      // which is the strongest signal this app collects, was being dropped on
+      // the floor. Record the search and its click together instead.
+      await prisma.searchEvent.create({
+        data: {
+          shopId: shop.id,
+          query: String(payload.query ?? "").slice(0, 200),
+          normalized,
+          // Unknown from here, and a click proves it was not zero. Left at 0
+          // would count this as a zero-result search, which is the opposite of
+          // the truth, so record the one result we know about.
+          resultsCount: 1,
+          clickedProductId: productId,
+          sessionToken,
+        },
+      });
     }
   }
 

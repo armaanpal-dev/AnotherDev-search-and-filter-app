@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getSearchEngine } from "../lib/search/index.server";
 import { getShopByDomain } from "../lib/shop.server";
+import { recordSearchEvent } from "../lib/analytics.server";
 import { resolveSettings } from "../lib/settings";
 import {
   parseSearchParams,
@@ -51,6 +52,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     includeUnavailable: settings.showOutOfStock,
     typoTolerance: settings.typoTolerance,
   });
+
+  // This page is where the search box sends a shopper who presses Enter, so
+  // it is a real search and has to be counted. Page 1 of an unfiltered query
+  // only: paging and refining are the same search, not new ones.
+  if (term && page === 1 && Object.keys(filters).length === 0 && !price) {
+    void recordSearchEvent({
+      shopId: shop.id,
+      term,
+      resultsCount: result.total,
+    });
+  }
 
   // A merchant redirect should redirect here too, not render an empty grid.
   if (result.redirect) {

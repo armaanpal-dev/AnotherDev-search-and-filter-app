@@ -111,6 +111,9 @@ export default function SettingsPage() {
   const fetcher = useFetcher<typeof action>();
   const s = settings;
   const busy = fetcher.state !== "idle";
+  // Only after a completed submit: fetcher.data survives, so checking it alone
+  // would leave the banner up while a second save is in flight.
+  const saved = fetcher.state === "idle" && Boolean(fetcher.data?.ok);
 
   return (
     <s-page heading="Settings">
@@ -126,6 +129,15 @@ export default function SettingsPage() {
         Save
       </s-button>
 
+      {saved && (
+        <s-banner tone="success" heading="Settings saved" dismissible>
+          <s-paragraph>
+            Your storefront picks these up within about 30 seconds, because the
+            widget caches settings briefly.
+          </s-paragraph>
+        </s-banner>
+      )}
+
       <s-section heading="Currently live">
         <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Live label="Instant search" on={s.autoAttach} />
@@ -138,6 +150,10 @@ export default function SettingsPage() {
       </s-section>
 
       <fetcher.Form method="post" id="adsf-settings">
+        {/* s-page only spaces its DIRECT s-section children. With the form in
+            between, every section card stacked flush against the next, so the
+            gap has to be supplied here. */}
+        <s-stack direction="block" gap="large-100">
         <s-section heading="Behaviour">
           <s-stack direction="block" gap="base">
             <Check name="autoAttach" checked={s.autoAttach} label="Upgrade my theme's search box with instant results" />
@@ -245,8 +261,8 @@ export default function SettingsPage() {
             defaultValue={swatchesToText(s.swatches)}
             placeholder={"royal blue = #4169e1\nheather grey = #b0b0b0\ncamo = https://cdn.example.com/camo.png"}
           />
-          {fetcher.data && <s-text tone="success">Saved. Changes appear on your storefront within ~30 seconds.</s-text>}
         </s-section>
+        </s-stack>
       </fetcher.Form>
 
       <s-section slot="aside" heading="How to turn it on">

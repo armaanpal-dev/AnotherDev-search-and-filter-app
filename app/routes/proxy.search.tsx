@@ -1,8 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { getSearchEngine } from "../lib/search/index.server";
-import { normalizeQuery } from "../lib/search/normalize";
+import { recordSearchEvent } from "../lib/analytics.server";
 import { parseSearchParams, jsonCors, loadProxyShop } from "../lib/proxy.server";
 
 // GET apps/anotherdev-search/search?q=...&page=1&sort=relevance&f.vendor=Nike&...
@@ -39,7 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // and counting those inflated every metric (searches, CTR, conversion rate).
   const sessionToken = url.searchParams.get("st") ?? undefined;
   if (term && isNewSearch({ page, sort, filters, price })) {
-    void recordSearch({
+    void recordSearchEvent({
       shopId: shop.shopId,
       term,
       resultsCount: result.total,
@@ -68,40 +67,3 @@ function isNewSearch(q: {
   );
 }
 
-async function recordSearch(input: {
-  shopId: string;
-  term: string;
-  resultsCount: number;
-  sessionToken?: string;
-}) {
-  try {
-    const normalized = normalizeQuery(input.term);
-
-    // Type-ahead submits can fire twice for one intent (debounce + Enter);
-    // collapse repeats from the same shopper within a minute.
-    if (input.sessionToken) {
-      const recent = await prisma.searchEvent.findFirst({
-        where: {
-          shopId: input.shopId,
-          normalized,
-          sessionToken: input.sessionToken,
-          createdAt: { gte: new Date(Date.now() - 60_000) },
-        },
-        select: { id: true },
-      });
-      if (recent) return;
-    }
-
-    await prisma.searchEvent.create({
-      data: {
-        shopId: input.shopId,
-        query: input.term,
-        normalized,
-        resultsCount: input.resultsCount,
-        sessionToken: input.sessionToken,
-      },
-    });
-  } catch {
-    // Analytics must never break search.
-  }
-}
