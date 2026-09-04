@@ -66,6 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     resultsPerPage: numeric("resultsPerPage"),
     gridColumns: numeric("gridColumns"),
     fontSize: numeric("fontSize"),
+    filterLayout: field("filterLayout"),
     panelStyle: field("panelStyle"),
     layout: field("layout"),
     previewSide: field("previewSide"),
@@ -159,6 +160,12 @@ export default function SettingsPage() {
               <s-number-field name="resultsPerPage" label="Products per page" min={12} max={48} defaultValue={String(s.resultsPerPage)} />
               <s-number-field name="gridColumns" label="Grid columns (desktop)" min={2} max={5} defaultValue={String(s.gridColumns)} />
             </s-grid>
+            <s-select name="filterLayout" label="Filter layout" value={s.filterLayout}>
+              <s-option value="sidebar">Sidebar beside the grid, drawer on mobile</s-option>
+              <s-option value="topbar">Toolbar in one row above the grid</s-option>
+              <s-option value="drawer">Always behind a Filters button</s-option>
+              <s-option value="inline">Always open, stacked above the grid</s-option>
+            </s-select>
             <Check name="showVendor" checked={s.showVendor} label="Show the brand name on result cards" />
             <Check name="quickAdd" checked={s.quickAdd} label="Add to cart directly from results (single-variant products)" />
           </s-stack>

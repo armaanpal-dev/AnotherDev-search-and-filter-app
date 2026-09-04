@@ -517,6 +517,10 @@
   //  2. Faceted results application
   // =======================================================================
   function initResultsApp(root, globalCfg) {
+    // The facet UI is presented four ways; the stylesheet does the work, so
+    // switching layout is one class rather than four render paths.
+    var layout = (globalCfg && globalCfg.filterLayout) || "sidebar";
+    root.classList.add("adsf-app--filters-" + layout);
     var cfg = Object.assign({}, globalCfg || {}, {
       proxy: root.getAttribute("data-proxy") || (globalCfg && globalCfg.proxy) || "/apps/anotherdev-search",
       moneyFormat: root.getAttribute("data-money-format") || (globalCfg && globalCfg.moneyFormat),
@@ -1346,6 +1350,7 @@
     cfg.autoAttach = s.autoAttach !== false;
     cfg.searchTakeover = s.searchTakeover !== false;
     cfg.collectionFilters = s.collectionFilters !== false;
+    cfg.filterLayout = s.filterLayout || "sidebar";
     cfg.resultsPerPage = s.resultsPerPage || 24;
     cfg.gridColumns = s.gridColumns || 4;
     cfg.showVendor = !!s.showVendor;
@@ -1387,6 +1392,7 @@
       autoAttach: g.autoAttach !== false,
       searchTakeover: true,
       collectionFilters: true,
+      filterLayout: "sidebar",
       resultsPerPage: 24,
       gridColumns: 4,
       showVendor: false,

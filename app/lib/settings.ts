@@ -16,6 +16,12 @@ export interface WidgetSettings {
   maxSuggestions: number;
   // Where the widget takes over
   collectionFilters: boolean;   // inject filters + grid on collection pages
+  // How the facet UI is presented on results and collection pages.
+  //   sidebar  column beside the grid, drawer on mobile (default)
+  //   topbar   one horizontal row above the grid
+  //   drawer   always behind a Filters button, at every width
+  //   inline   always open, stacked above the grid
+  filterLayout: "sidebar" | "topbar" | "drawer" | "inline";
   // Layout / look
   panelStyle: "dropdown" | "spotlight";
   layout: "rich" | "list";      // two-pane hover preview vs simple list
@@ -46,6 +52,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   minChars: 2,
   maxSuggestions: 8,
   collectionFilters: true,
+  filterLayout: "sidebar",
   panelStyle: "spotlight",
   layout: "rich",
   previewSide: "left",
@@ -76,6 +83,11 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     minChars: num(s.minChars, DEFAULT_SETTINGS.minChars, 1, 4),
     maxSuggestions: num(s.maxSuggestions, DEFAULT_SETTINGS.maxSuggestions, 3, 12),
     collectionFilters: bool(s.collectionFilters, DEFAULT_SETTINGS.collectionFilters),
+    filterLayout: oneOf(
+      s.filterLayout,
+      ["sidebar", "topbar", "drawer", "inline"],
+      DEFAULT_SETTINGS.filterLayout,
+    ),
     panelStyle: oneOf(s.panelStyle, ["spotlight", "dropdown"], DEFAULT_SETTINGS.panelStyle),
     layout: oneOf(s.layout, ["rich", "list"], DEFAULT_SETTINGS.layout),
     previewSide: oneOf(s.previewSide, ["left", "right"], DEFAULT_SETTINGS.previewSide),

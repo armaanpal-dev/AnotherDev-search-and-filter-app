@@ -178,11 +178,52 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 
 .adsf-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1100; }
 
+/* ---- Filter layouts -------------------------------------------------
+   Chosen by the merchant in the app settings and applied as one class on
+   the results root. The default (sidebar) is the base CSS above, so only
+   the other three need rules. */
+
+/* Toolbar: facet groups flow in one row above the grid. */
+.adsf-app--filters-topbar .adsf-app__body { grid-template-columns: 1fr; }
+.adsf-app--filters-topbar .adsf-facets__inner {
+  position: static; flex-direction: row; flex-wrap: wrap; gap: 1rem 1.5rem;
+  padding: 0.75rem 0 1rem; border-bottom: 1px solid #eee; margin-bottom: 1.25rem;
+}
+.adsf-app--filters-topbar .adsf-facet { min-width: 150px; }
+.adsf-app--filters-topbar .adsf-facet__list { max-height: 190px; }
+
+/* Inline: facets always visible, stacked above the grid. */
+.adsf-app--filters-inline .adsf-app__body { grid-template-columns: 1fr; }
+.adsf-app--filters-inline .adsf-facets__inner {
+  position: static; flex-direction: row; flex-wrap: wrap; gap: 1rem 2rem;
+  margin-bottom: 1.5rem;
+}
+.adsf-app--filters-inline .adsf-facet { min-width: 190px; }
+
+/* Drawer: behind a Filters button at every width, not just on mobile. */
+.adsf-app--filters-drawer .adsf-app__body { grid-template-columns: 1fr; }
+.adsf-app--filters-drawer .adsf-app__filter-toggle { display: inline-block; }
+.adsf-app--filters-drawer .adsf-facets {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: 340px;
+  z-index: 1200; background: #fff; transform: translateX(-100%);
+  transition: transform .25s ease; overflow-y: auto; padding: 1.25rem;
+  box-shadow: 2px 0 24px rgba(0,0,0,.2);
+}
+.adsf-app--filters-drawer .adsf-facets.is-open { transform: translateX(0); }
+.adsf-app--filters-drawer .adsf-facets__inner { position: static; flex-direction: column; }
+
 /* ---- Mobile ---- */
 @media (max-width: 749px) {
-  .adsf-app__body { grid-template-columns: 1fr; }
+  /* Whatever the merchant chose, a phone gets the drawer. */
+  .adsf-app__body,
+  .adsf-app--filters-topbar .adsf-app__body,
+  .adsf-app--filters-inline .adsf-app__body { grid-template-columns: 1fr; }
   .adsf-app__filter-toggle { display: inline-block; }
   .adsf-app { --adsf-cols: 2; }
+  .adsf-app--filters-topbar .adsf-facets__inner,
+  .adsf-app--filters-inline .adsf-facets__inner {
+    flex-direction: column; border-bottom: 0; margin-bottom: 0; padding: 0;
+  }
   .adsf-facets {
     position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: 340px; z-index: 1200;
     background: #fff; transform: translateX(-100%); transition: transform .25s ease; overflow-y: auto; padding: 1.25rem; box-shadow: 2px 0 24px rgba(0,0,0,.2);
