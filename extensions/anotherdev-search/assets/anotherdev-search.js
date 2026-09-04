@@ -1303,7 +1303,10 @@
     }
 
     function loadFacets() {
-      var q = cfg.proxy + "/search?perPage=1&collection=" + encodeURIComponent(handle);
+      var q =
+        cfg.proxy +
+        "/search?perPage=1" +
+        (handle ? "&collection=" + encodeURIComponent(handle) : "");
       fetch(q, { headers: { Accept: "application/json" } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -1497,10 +1500,10 @@
     var host = findGridHost();
     if (!host) return false;
 
-    // Default path: keep the theme's product cards and only add our filters.
+    // The theme always draws collection product cards; we only add filters.
     // Falls through to our own grid if the theme has no addressable section.
-    if ((cfg.collectionGrid || "theme") === "theme") {
-      if (initThemeGridFacets(cfg, scope || handle, host)) return true;
+    {
+      if (initThemeGridFacets(cfg, scope, host)) return true;
     }
 
     // Ask before replacing anything.
@@ -1580,7 +1583,6 @@
     cfg.searchTakeover = s.searchTakeover !== false;
     cfg.collectionFilters = s.collectionFilters !== false;
     cfg.filterLayout = s.filterLayout || "sidebar";
-    cfg.collectionGrid = s.collectionGrid || "theme";
     cfg.resultsPerPage = s.resultsPerPage || 24;
     cfg.gridColumns = s.gridColumns || 4;
     cfg.showVendor = !!s.showVendor;
@@ -1623,7 +1625,6 @@
       searchTakeover: true,
       collectionFilters: true,
       filterLayout: "sidebar",
-      collectionGrid: "theme",
       resultsPerPage: 24,
       gridColumns: 4,
       showVendor: false,

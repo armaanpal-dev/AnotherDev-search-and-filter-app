@@ -66,7 +66,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     resultsPerPage: numeric("resultsPerPage"),
     gridColumns: numeric("gridColumns"),
     fontSize: numeric("fontSize"),
-    collectionGrid: field("collectionGrid"),
     filterLayout: field("filterLayout"),
     panelStyle: field("panelStyle"),
     layout: field("layout"),
@@ -177,10 +176,6 @@ export default function SettingsPage() {
               <s-number-field name="resultsPerPage" label="Products per page" min={12} max={48} defaultValue={String(s.resultsPerPage)} />
               <s-number-field name="gridColumns" label="Grid columns (desktop)" min={2} max={5} defaultValue={String(s.gridColumns)} />
             </s-grid>
-            <s-select name="collectionGrid" label="Collection product cards" value={s.collectionGrid}>
-              <s-option value="theme">Your theme draws them (recommended)</s-option>
-              <s-option value="app">This app draws them</s-option>
-            </s-select>
             <s-select name="filterLayout" label="Filter layout" value={s.filterLayout}>
               <s-option value="sidebar">Sidebar beside the grid, drawer on mobile</s-option>
               <s-option value="topbar">Toolbar in one row above the grid</s-option>

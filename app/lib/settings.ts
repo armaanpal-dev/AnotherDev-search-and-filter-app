@@ -22,10 +22,6 @@ export interface WidgetSettings {
   //   drawer   always behind a Filters button, at every width
   //   inline   always open, stacked above the grid
   filterLayout: "sidebar" | "topbar" | "drawer" | "inline";
-  // Who draws the product cards on a collection page.
-  //   theme  our filters, the theme's own grid (via Section Rendering)
-  //   app    our filters and our grid
-  collectionGrid: "theme" | "app";
   // Layout / look
   panelStyle: "dropdown" | "spotlight";
   layout: "rich" | "list";      // two-pane hover preview vs simple list
@@ -57,7 +53,6 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   maxSuggestions: 8,
   collectionFilters: true,
   filterLayout: "sidebar",
-  collectionGrid: "theme",
   panelStyle: "spotlight",
   layout: "rich",
   previewSide: "left",
@@ -88,7 +83,6 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     minChars: num(s.minChars, DEFAULT_SETTINGS.minChars, 1, 4),
     maxSuggestions: num(s.maxSuggestions, DEFAULT_SETTINGS.maxSuggestions, 3, 12),
     collectionFilters: bool(s.collectionFilters, DEFAULT_SETTINGS.collectionFilters),
-    collectionGrid: oneOf(s.collectionGrid, ["theme", "app"], DEFAULT_SETTINGS.collectionGrid),
     filterLayout: oneOf(
       s.filterLayout,
       ["sidebar", "topbar", "drawer", "inline"],
