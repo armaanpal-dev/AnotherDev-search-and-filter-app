@@ -1209,6 +1209,44 @@
   // synonyms, typo tolerance or merchandising — none of which matter here,
   // because a collection page has no search term to be relevant to.
 
+  // The Shopify param a facet maps to, or null when there is no equivalent.
+  function paramForSource(source) {
+    if (source === "vendor") return "filter.p.vendor";
+    if (source === "productType") return "filter.p.product_type";
+    if (source === "tag") return "filter.p.tag";
+    if (source === "availability") return "filter.v.availability";
+    if (source === "price") return "filter.v.price.gte";
+    if (source.indexOf("option:") === 0) {
+      return "filter.v.option." + source.slice(7).toLowerCase();
+    }
+    if (source.indexOf("metafield:") === 0) return "filter.p.m." + source.slice(10);
+    return null;
+  }
+
+  /**
+   * The filter params this storefront actually supports.
+   *
+   * Section Rendering only applies filters the merchant has enabled under
+   * Storefront filters; anything else is silently ignored, so a facet we render
+   * for it looks broken. The theme prints its own enabled filters as inputs
+   * named filter.*, so reading those tells us exactly what will work.
+   *
+   * Returns null when the theme exposes none, which means "cannot tell" rather
+   * than "none supported" — we show everything rather than hide the whole bar.
+   */
+  function themeFilterParams() {
+    var found = {};
+    var n = 0;
+    var nodes = document.querySelectorAll('[name^="filter."]');
+    Array.prototype.forEach.call(nodes, function (el) {
+      var name = el.getAttribute("name") || "";
+      // Price arrives as filter.v.price.gte / .lte; treat them as one.
+      var key = name.indexOf("filter.v.price") === 0 ? "filter.v.price.gte" : name;
+      if (!found[key]) { found[key] = true; n++; }
+    });
+    return n ? found : null;
+  }
+
   // Our facet source -> Shopify storefront filter parameter.
   function shopifyFilterParams(state) {
     var sp = new URLSearchParams();
@@ -1328,38 +1366,66 @@
         .catch(function () {});
     }
 
+    // Facets render as dropdown buttons: a compact row of labels that open a
+    // panel of options, rather than every value stacked open at once. A shop
+    // with six facets and forty values is unreadable as open lists.
     function renderFacetList(facets) {
       facetsInner.innerHTML = "";
-      facets.forEach(function (fct) {
-        var group = el("div", "adsf-facet");
-        group.appendChild(el("h4", "adsf-facet__title", esc(fct.label)));
+      var supported = themeFilterParams();
+      var usable = facets.filter(function (fct) {
+        var p = paramForSource(fct.source);
+        if (!p) return false;
+        // No signal from the theme: show everything rather than an empty bar.
+        return !supported || supported[p];
+      });
+      if (!usable.length) { panel.hidden = true; return; }
+      panel.hidden = false;
+
+      usable.forEach(function (fct) {
+        var chosen = (state.filters[fct.source] || []).length;
+        var wrap = el("div", "adsf-fdd");
+        var btn = el("button", "adsf-fdd__btn");
+        btn.type = "button";
+        btn.setAttribute("aria-expanded", "false");
+        if (chosen) btn.classList.add("is-active");
+
+        var caret = '<span class="adsf-fdd__caret" aria-hidden="true"></span>';
+        btn.innerHTML =
+          "<span>" + esc(fct.label) + (chosen ? " (" + chosen + ")" : "") + "</span>" + caret;
+
+        var pop = el("div", "adsf-fdd__pop");
+        pop.hidden = true;
+
         if (fct.displayAs === "range") {
-          var wrap = el("div", "adsf-facet__range");
+          var rw = el("div", "adsf-facet__range");
           var min = el("input", "adsf-facet__num"); min.type = "number";
           min.placeholder = fct.min != null ? String(Math.floor(fct.min)) : "Min";
           min.value = state.priceMin || "";
           var max = el("input", "adsf-facet__num"); max.type = "number";
           max.placeholder = fct.max != null ? String(Math.ceil(fct.max)) : "Max";
           max.value = state.priceMax || "";
-          var go = el("button", "adsf-facet__apply", "Go"); go.type = "button";
+          var go = el("button", "adsf-facet__apply", "Apply"); go.type = "button";
           go.addEventListener("click", function () {
             state.priceMin = min.value || null;
             state.priceMax = max.value || null;
             renderTheme();
           });
-          wrap.appendChild(min); wrap.appendChild(el("span", "adsf-facet__dash", "–"));
-          wrap.appendChild(max); wrap.appendChild(go);
-          group.appendChild(wrap);
+          rw.appendChild(min);
+          rw.appendChild(el("span", "adsf-facet__dash", "to"));
+          rw.appendChild(max);
+          rw.appendChild(go);
+          pop.appendChild(rw);
         } else {
           var list = el("ul", "adsf-facet__list");
           var selected = state.filters[fct.source] || [];
           fct.values.forEach(function (v) {
             var li = el("li", "adsf-facet__item");
-            var id = "adsfx_" + fct.source.replace(/[^a-z0-9]/gi, "") + "_" + String(v.value).replace(/[^a-z0-9]/gi, "");
+            var id = "adsfx_" + fct.source.replace(/[^a-z0-9]/gi, "") + "_" +
+              String(v.value).replace(/[^a-z0-9]/gi, "");
             var cb = el("input"); cb.type = "checkbox"; cb.id = id;
             cb.checked = selected.indexOf(v.value) >= 0;
             cb.addEventListener("change", function () {
-              var arr = state.filters[fct.source] || [];
+              var arr = (state.filters[fct.source] || []).slice();
               if (cb.checked) { if (arr.indexOf(v.value) < 0) arr.push(v.value); }
               else arr = arr.filter(function (x) { return x !== v.value; });
               if (arr.length) state.filters[fct.source] = arr;
@@ -1368,17 +1434,66 @@
             });
             var lbl = el("label");
             lbl.setAttribute("for", id);
+            var count = cfg.showFacetCounts === false
+              ? ""
+              : ' <span class="adsf-facet__count">' + v.count + "</span>";
             lbl.insertAdjacentHTML("beforeend",
-              '<span class="adsf-facet__label">' + esc(v.label) + '</span> <span class="adsf-facet__count">' + v.count + "</span>");
+              '<span class="adsf-facet__label">' + esc(v.label) + "</span>" + count);
             li.appendChild(cb); li.appendChild(lbl);
             list.appendChild(li);
           });
-          group.appendChild(list);
+          pop.appendChild(list);
         }
-        facetsInner.appendChild(group);
+
+        btn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          var open = pop.hidden;
+          closeAllPops();
+          pop.hidden = !open;
+          btn.setAttribute("aria-expanded", String(open));
+        });
+        pop.addEventListener("click", function (e) { e.stopPropagation(); });
+
+        wrap.appendChild(btn);
+        wrap.appendChild(pop);
+        facetsInner.appendChild(wrap);
       });
+
+      if (chosenCount()) {
+        var clear = el("button", "adsf-fdd__clear", "Clear all");
+        clear.type = "button";
+        clear.addEventListener("click", function () {
+          state.filters = {};
+          state.priceMin = state.priceMax = null;
+          renderTheme();
+        });
+        facetsInner.appendChild(clear);
+      }
     }
 
+    function chosenCount() {
+      var n = state.priceMin || state.priceMax ? 1 : 0;
+      Object.keys(state.filters).forEach(function (k) {
+        n += (state.filters[k] || []).length;
+      });
+      return n;
+    }
+
+    function closeAllPops() {
+      Array.prototype.forEach.call(
+        panel.querySelectorAll(".adsf-fdd__pop"),
+        function (p) { p.hidden = true; },
+      );
+      Array.prototype.forEach.call(
+        panel.querySelectorAll(".adsf-fdd__btn"),
+        function (b) { b.setAttribute("aria-expanded", "false"); },
+      );
+    }
+
+    document.addEventListener("click", closeAllPops);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeAllPops();
+    });
     var toggle = panel.querySelector("[data-adsf-filter-toggle]");
     var facetsEl = panel.querySelector("[data-adsf-facets]");
     if (toggle && facetsEl) {
@@ -1594,6 +1709,7 @@
     cfg.searchTakeover = s.searchTakeover !== false;
     cfg.collectionFilters = s.collectionFilters !== false;
     cfg.filterLayout = s.filterLayout || "sidebar";
+    cfg.showFacetCounts = s.showFacetCounts !== false;
     cfg.resultsPerPage = s.resultsPerPage || 24;
     cfg.gridColumns = s.gridColumns || 4;
     cfg.showVendor = !!s.showVendor;
@@ -1608,6 +1724,15 @@
     }
     // Appearance → CSS variables
     var rs = document.documentElement.style;
+    // Filter button appearance, applied as CSS variables so the stylesheet
+    // stays free of merchant-specific values.
+    var shape = s.filterButtonShape || "pill";
+    var radius = shape === "square" ? "0" : shape === "rounded" ? "8px" : "999px";
+    rs.setProperty("--adsf-filter-radius", radius);
+    if (s.filterButtonBg) rs.setProperty("--adsf-filter-bg", s.filterButtonBg);
+    if (s.filterButtonText) rs.setProperty("--adsf-filter-text", s.filterButtonText);
+    if (s.filterActiveBg) rs.setProperty("--adsf-filter-active-bg", s.filterActiveBg);
+    if (s.filterActiveText) rs.setProperty("--adsf-filter-active-text", s.filterActiveText);
     if (s.accentColor) rs.setProperty("--adsf-accent", s.accentColor);
     if (s.backgroundColor) rs.setProperty("--adsf-dd-bg", s.backgroundColor);
     if (s.textColor) rs.setProperty("--adsf-dd-text", s.textColor);

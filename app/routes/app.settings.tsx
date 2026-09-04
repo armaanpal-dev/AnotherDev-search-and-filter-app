@@ -67,6 +67,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     gridColumns: numeric("gridColumns"),
     fontSize: numeric("fontSize"),
     filterLayout: field("filterLayout"),
+    filterButtonShape: field("filterButtonShape"),
+    filterButtonBg: field("filterButtonBg"),
+    filterButtonText: field("filterButtonText"),
+    filterActiveBg: field("filterActiveBg"),
+    filterActiveText: field("filterActiveText"),
+    showFacetCounts: checkbox("showFacetCounts"),
     panelStyle: field("panelStyle"),
     layout: field("layout"),
     previewSide: field("previewSide"),
@@ -184,6 +190,25 @@ export default function SettingsPage() {
             </s-select>
             <Check name="showVendor" checked={s.showVendor} label="Show the brand name on result cards" />
             <Check name="quickAdd" checked={s.quickAdd} label="Add to cart directly from results (single-variant products)" />
+          </s-stack>
+        </s-section>
+
+        <s-section heading="Filter appearance">
+          <s-stack direction="block" gap="base">
+            <s-select name="filterButtonShape" label="Filter button shape" value={s.filterButtonShape}>
+              <s-option value="pill">Pill</s-option>
+              <s-option value="rounded">Rounded corners</s-option>
+              <s-option value="square">Square</s-option>
+            </s-select>
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <ColorField name="filterButtonBg" label="Button background" value={s.filterButtonBg} />
+              <ColorField name="filterButtonText" label="Button text" value={s.filterButtonText} />
+            </s-grid>
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <ColorField name="filterActiveBg" label="Selected background" value={s.filterActiveBg} />
+              <ColorField name="filterActiveText" label="Selected text" value={s.filterActiveText} />
+            </s-grid>
+            <Check name="showFacetCounts" checked={s.showFacetCounts} label="Show the number of products beside each filter value" />
           </s-stack>
         </s-section>
 

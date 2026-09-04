@@ -22,6 +22,13 @@ export interface WidgetSettings {
   //   drawer   always behind a Filters button, at every width
   //   inline   always open, stacked above the grid
   filterLayout: "sidebar" | "topbar" | "drawer" | "inline";
+  // Filter button appearance.
+  filterButtonShape: "pill" | "rounded" | "square";
+  filterButtonBg: string;
+  filterButtonText: string;
+  filterActiveBg: string;
+  filterActiveText: string;
+  showFacetCounts: boolean;
   // Layout / look
   panelStyle: "dropdown" | "spotlight";
   layout: "rich" | "list";      // two-pane hover preview vs simple list
@@ -53,6 +60,12 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   maxSuggestions: 8,
   collectionFilters: true,
   filterLayout: "sidebar",
+  filterButtonShape: "pill",
+  filterButtonBg: "transparent",
+  filterButtonText: "#1a1a1a",
+  filterActiveBg: "#111111",
+  filterActiveText: "#ffffff",
+  showFacetCounts: true,
   panelStyle: "spotlight",
   layout: "rich",
   previewSide: "left",
@@ -83,6 +96,12 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     minChars: num(s.minChars, DEFAULT_SETTINGS.minChars, 1, 4),
     maxSuggestions: num(s.maxSuggestions, DEFAULT_SETTINGS.maxSuggestions, 3, 12),
     collectionFilters: bool(s.collectionFilters, DEFAULT_SETTINGS.collectionFilters),
+    filterButtonShape: oneOf(s.filterButtonShape, ["pill", "rounded", "square"], DEFAULT_SETTINGS.filterButtonShape),
+    filterButtonBg: color(s.filterButtonBg, DEFAULT_SETTINGS.filterButtonBg),
+    filterButtonText: color(s.filterButtonText, DEFAULT_SETTINGS.filterButtonText),
+    filterActiveBg: color(s.filterActiveBg, DEFAULT_SETTINGS.filterActiveBg),
+    filterActiveText: color(s.filterActiveText, DEFAULT_SETTINGS.filterActiveText),
+    showFacetCounts: bool(s.showFacetCounts, DEFAULT_SETTINGS.showFacetCounts),
     filterLayout: oneOf(
       s.filterLayout,
       ["sidebar", "topbar", "drawer", "inline"],
