@@ -1273,20 +1273,36 @@
     var host = findGridHost();
     if (!host) return false;
 
-    var mount = el("div", "adsf-app");
-    mount.setAttribute("data-adsf-results-app", "");
-    mount.setAttribute("data-proxy", cfg.proxy);
-    mount.setAttribute("data-collection", handle);
-    mount.setAttribute("data-per-page", String(cfg.resultsPerPage || 24));
-    if (cfg.moneyFormat) mount.setAttribute("data-money-format", cfg.moneyFormat);
-    mount.style.setProperty("--adsf-cols", String(cfg.gridColumns || 4));
-    mount.innerHTML = RESULTS_MARKUP;
-    host.innerHTML = "";
-    host.appendChild(mount);
-    // The theme's own facet form is still on the page and now points at a grid
-    // that no longer exists. Hide it rather than delete it.
-    document.body.classList.add("adsf-collection-active");
-    initResultsApp(mount, cfg);
+    // Ask before replacing anything.
+    //
+    // If our index has no products for this collection, the theme is showing a
+    // perfectly good grid and we would swap it for "No products found" — which
+    // is exactly what happened when collection membership was missing from the
+    // index. An unfiltered collection that we believe is empty means OUR data
+    // is wrong, not the store, so we leave the page alone.
+    var probe = cfg.proxy + "/search?perPage=1&collection=" + encodeURIComponent(handle);
+    fetch(probe, { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.total) return;
+        var mount = el("div", "adsf-app");
+        mount.setAttribute("data-adsf-results-app", "");
+        mount.setAttribute("data-proxy", cfg.proxy);
+        mount.setAttribute("data-collection", handle);
+        mount.setAttribute("data-per-page", String(cfg.resultsPerPage || 24));
+        if (cfg.moneyFormat) mount.setAttribute("data-money-format", cfg.moneyFormat);
+        mount.style.setProperty("--adsf-cols", String(cfg.gridColumns || 4));
+        mount.innerHTML = RESULTS_MARKUP;
+        host.innerHTML = "";
+        host.appendChild(mount);
+        // The theme's own facet form now drives a grid that is gone. Hide it
+        // rather than delete it.
+        document.body.classList.add("adsf-collection-active");
+        initResultsApp(mount, cfg);
+      })
+      .catch(function () {
+        // Proxy unreachable: the theme keeps its own grid. Nothing to undo.
+      });
     return true;
   }
 

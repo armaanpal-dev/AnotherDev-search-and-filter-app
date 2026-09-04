@@ -66,10 +66,10 @@ const BULK_QUERY = `#graphql
           }
         }
         collections {
-          edges { node { handle } }
+          edges { node { id handle } }
         }
         metafields {
-          edges { node { namespace key value type } }
+          edges { node { id namespace key value type } }
         }
       }
     }
@@ -195,9 +195,12 @@ export function parseBulkJsonl(text: string): NormalizedProduct[] {
     const id: string = obj.id ?? "";
     if (id.includes("/ProductVariant/")) {
       if (obj.__parentId) push(variantsByParent, obj.__parentId, obj);
-    } else if (id.includes("/Metafield/")) {
+    } else if (id.includes("/Metafield/") || (obj.__parentId && obj.key != null)) {
+      // A metafield line is recognisable by `key` even with no id.
       if (obj.__parentId) push(metafieldsByParent, obj.__parentId, obj);
-    } else if (id.includes("/Collection/")) {
+    } else if (id.includes("/Collection/") || (obj.__parentId && obj.handle && !id)) {
+      // A collection line carries a handle and a parent, and no product line
+      // ever has a __parentId, so this cannot swallow a product.
       if (obj.__parentId && obj.handle)
         push(collectionsByParent, obj.__parentId, obj.handle);
     } else if (id.includes("/Product/")) {
