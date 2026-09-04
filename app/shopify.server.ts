@@ -8,8 +8,11 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 
-// Two simple plans. Free is the no-charge default (no subscription needed);
-// PRO is the single paid tier. Keep this the ONLY source of truth for pricing.
+// Plan names as Shopify knows them. Free needs no subscription, so it is not
+// listed here. These strings are what appear on the merchant invoice and in
+// billing.check(), so renaming one orphans existing subscriptions.
+// Entitlements live in app/lib/billing.server.ts; this file only sets price.
+export const GROWTH_PLAN = "Growth";
 export const PRO_PLAN = "Pro";
 
 const shopify = shopifyApp({
@@ -22,10 +25,20 @@ const shopify = shopifyApp({
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
   billing: {
+    [GROWTH_PLAN]: {
+      lineItems: [
+        {
+          amount: 21,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
+      trialDays: 14,
+    },
     [PRO_PLAN]: {
       lineItems: [
         {
-          amount: 9.99,
+          amount: 49,
           currencyCode: "USD",
           interval: BillingInterval.Every30Days,
         },

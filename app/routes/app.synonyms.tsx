@@ -50,7 +50,7 @@ export default function SynonymsPage() {
   return (
     <s-page heading="Synonyms">
       <s-section heading="Overview">
-        <s-grid gridTemplateColumns={TILES} gap="base">
+        <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Stat label="Groups" value={String(synonyms.length)} />
           <Stat label="Interchangeable" value={String(multi)} />
           <Stat label="One-way" value={String(synonyms.length - multi)} />
@@ -89,7 +89,7 @@ export default function SynonymsPage() {
           </s-stack>
         </fetcher.Form>
 
-        <s-grid gridTemplateColumns={CARDS} gap="base">
+        <s-grid gridTemplateColumns={CARDS} gap="large-100">
           <Card title="Interchangeable">
             <s-text color="subdued">
               Every term finds the others. Searching sneaker also returns trainer
@@ -115,7 +115,7 @@ export default function SynonymsPage() {
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="delete" />
                     <input type="hidden" name="id" value={s.id} />
-                    <s-button type="submit" variant="tertiary" tone="critical">
+                    <s-button type="submit" variant="secondary" tone="critical">
                       Delete
                     </s-button>
                   </fetcher.Form>

@@ -10,6 +10,7 @@ import {
   looksLikeSku,
 } from "./normalize";
 import { embedQuery, semanticReady, toVectorLiteral } from "./embeddings.server";
+import { limitsForPlanName } from "../plans";
 import type {
   SearchEngine,
   SearchQuery,
@@ -326,7 +327,8 @@ export class PostgresSearchEngine implements SearchEngine {
 
     // Semantic is opt-in per shop, needs Pro, a provider and the pgvector column.
     const wantSemantic =
-      hasTerm && q.semantic !== false && cfg.settings.semanticSearch && cfg.planName === "pro";
+      hasTerm && q.semantic !== false && cfg.settings.semanticSearch &&
+      limitsForPlanName(cfg.planName).semantic;
     const queryVector =
       wantSemantic && (await semanticReady()) ? await embedQuery(normalized) : null;
 

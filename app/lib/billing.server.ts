@@ -1,27 +1,30 @@
-import { PRO_PLAN } from "../shopify.server";
+import { GROWTH_PLAN, PRO_PLAN } from "../shopify.server";
+import {
+  PLAN_LIMITS,
+  PLAN_ORDER,
+  isPlanKey,
+  limitsForPlanName,
+  type PlanKey,
+  type PlanLimits,
+} from "./plans";
 
-// Feature limits per plan. Free mirrors the category's entry tier (XCloud = 100
-// products free); Pro unlocks everything. One place to tune the offering.
-export const PLAN_LIMITS = {
-  free: {
-    name: "Free",
-    productLimit: 100,
-    merchandising: false,
-    redirects: false,
-    analyticsDays: 7,
-    aiFeed: false,
-  },
-  pro: {
-    name: "Pro",
-    productLimit: Infinity,
-    merchandising: true,
-    redirects: true,
-    analyticsDays: 90,
-    aiFeed: true,
-  },
-} as const;
+// The plan table itself lives in ./plans.ts, which has no server imports, so the
+// pricing page can render it in the browser. This module is the half that needs
+// the Shopify server SDK. Re-exported so server code keeps one import site.
+export { PLAN_LIMITS, PLAN_ORDER, isPlanKey, limitsForPlanName };
+export type { PlanKey, PlanLimits };
 
-export type PlanKey = keyof typeof PLAN_LIMITS;
+/** Highest tier first: used when resolving which subscription a shop holds. */
+const PAID_ORDER: { key: PlanKey; billingPlan: string }[] = [
+  { key: "pro", billingPlan: PRO_PLAN },
+  { key: "growth", billingPlan: GROWTH_PLAN },
+];
+
+/** The Shopify-side plan name for each paid tier. Free has no subscription. */
+export const BILLING_PLAN_BY_KEY: Partial<Record<PlanKey, string>> = {
+  growth: GROWTH_PLAN,
+  pro: PRO_PLAN,
+};
 
 /**
  * Whether charges are created in Shopify's test mode (approved in the admin but
@@ -36,31 +39,65 @@ export function isTestBilling(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
-
 export interface PlanStatus {
   plan: PlanKey;
-  isPro: boolean;
-  limits: (typeof PLAN_LIMITS)[PlanKey];
+  /** True for any paid tier, for call sites that only care "is it paid". */
+  isPaid: boolean;
+  /** Set when an operator pinned the plan, so the UI can say the charge is waived. */
+  overridden: boolean;
+  limits: PlanLimits;
 }
 
-/** Resolve the current plan from Shopify's billing state. Free is the fallback.
- *  `billing` is the BillingContext from authenticate.admin(); typed loosely to
- *  avoid coupling to its deep generic shape. */
-export async function getPlanStatus(billing: {
-  check: (opts: { plans: [typeof PRO_PLAN]; isTest?: boolean }) => Promise<{ hasActivePayment: boolean }>;
-}): Promise<PlanStatus> {
-  let isPro = false;
-  try {
-    const { hasActivePayment } = await billing.check({
-      plans: [PRO_PLAN] as [typeof PRO_PLAN],
-      isTest: isTestBilling(),
-    });
-    isPro = hasActivePayment;
-  } catch {
-    isPro = false;
+// Loosely typed on purpose: BillingContext.check() is generic over the plan
+// names declared in shopifyApp(), so a structural type naming string[] is not
+// assignable to it. Only two fields off the result are needed.
+type BillingCheckResult = {
+  hasActivePayment: boolean;
+  appSubscriptions?: { name?: string }[];
+};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type BillingCheck = { check: (opts: any) => Promise<any> };
+
+/**
+ * Resolve the shop's tier.
+ *
+ * An operator override short-circuits the billing call entirely: the whole point
+ * is to grant a tier Shopify has no charge for, so asking Shopify first would
+ * only produce the wrong answer more slowly.
+ */
+export async function getPlanStatus(
+  billing: BillingCheck,
+  planOverride?: string | null,
+): Promise<PlanStatus> {
+  if (isPlanKey(planOverride)) {
+    return {
+      plan: planOverride,
+      isPaid: planOverride !== "free",
+      overridden: true,
+      limits: PLAN_LIMITS[planOverride],
+    };
   }
-  const plan: PlanKey = isPro ? "pro" : "free";
-  return { plan, isPro, limits: PLAN_LIMITS[plan] };
+
+  let plan: PlanKey = "free";
+  try {
+    const res = (await billing.check({
+      plans: PAID_ORDER.map((p) => p.billingPlan),
+      isTest: isTestBilling(),
+    })) as BillingCheckResult;
+    if (res.hasActivePayment) {
+      // A shop could hold more than one subscription mid-upgrade; the highest
+      // tier it is actually paying for is the one it should get.
+      const held = new Set((res.appSubscriptions ?? []).map((s) => s?.name));
+      const match = PAID_ORDER.find((p) => held.has(p.billingPlan));
+      // Fall back to the entry tier when Shopify confirms a payment but does not
+      // name it, rather than silently downgrading a paying merchant to Free.
+      plan = match ? match.key : "growth";
+    }
+  } catch {
+    plan = "free";
+  }
+
+  return { plan, isPaid: plan !== "free", overridden: false, limits: PLAN_LIMITS[plan] };
 }
 
-export { PRO_PLAN };
+export { GROWTH_PLAN, PRO_PLAN };

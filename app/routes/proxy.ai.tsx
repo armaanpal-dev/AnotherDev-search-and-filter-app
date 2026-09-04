@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getSearchEngine } from "../lib/search/index.server";
 import { getShopByDomain } from "../lib/shop.server";
+import { limitsForPlanName } from "../lib/plans";
 import { parseSearchParams, jsonCors } from "../lib/proxy.server";
 import { resolveSettings } from "../lib/settings";
 import type { SortKey, FilterSelection } from "../lib/search/types";
@@ -17,8 +18,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shop = await getShopByDomain(session.shop);
   if (!shop) return jsonCors({ error: "shop_not_initialized" }, 404);
 
-  // The AI feed is a Pro feature.
-  if (shop.planName !== "pro") {
+  // The AI feed is a Pro capability. There is no billing context on a
+  // storefront request, so this reads the plan the admin last resolved.
+  if (!limitsForPlanName(shop.planName).aiFeed) {
     return jsonCors({ error: "upgrade_required", message: "The AI feed requires the Pro plan." }, 402);
   }
 

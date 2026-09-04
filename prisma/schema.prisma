@@ -46,7 +46,15 @@ model Shop {
   domain       String   @unique // foo.myshopify.com
   name         String?
   currencyCode String?
+  // Plan resolved from Shopify billing on every admin visit and by the
+  // app_subscriptions/update webhook. Never edit this by hand: it is
+  // overwritten. Use planOverride instead.
   planName     String   @default("free")
+  // Manual override, set by an operator rather than by billing. When present
+  // it wins over whatever Shopify reports, which is how a shop gets a paid
+  // tier without a charge (an agency client, a partner, a long trial). Clear
+  // it to hand control back to billing.
+  planOverride String?
   installedAt  DateTime @default(now())
   uninstalledAt DateTime?
 

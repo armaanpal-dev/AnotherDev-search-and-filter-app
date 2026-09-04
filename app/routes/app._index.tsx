@@ -5,11 +5,12 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
+import { PLAN_LIMITS } from "../lib/plans";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = await getShopByDomain(session.shop);
-  const { isPro } = await getPlanStatus(billing);
+  const { plan, limits } = await getPlanStatus(billing, shop?.planOverride);
 
   // Deep link into the theme editor with our app embed already switched on, so
   // step 2 is one click instead of a hunt through Theme settings. Shopify's
@@ -32,7 +33,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     searches7d: 0,
     zeroCount: 0,
     clicks7d: 0,
-    isPro,
+    plan,
+    aiFeed: limits.aiFeed,
     themeEditorUrl,
     storefront,
   };
@@ -94,7 +96,7 @@ export default function Dashboard() {
       )}
 
       <s-section heading="Last 7 days">
-        <s-grid gridTemplateColumns={TILES} gap="base">
+        <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Stat label="Products indexed" value={d.productCount.toLocaleString()} />
           <Stat label="Searches" value={d.searches7d.toLocaleString()} />
           <Stat
@@ -104,38 +106,39 @@ export default function Dashboard() {
             href={d.zeroCount > 0 ? "/app/analytics" : undefined}
           />
           <Stat label="Click-through" value={`${ctr}%`} />
-          <Stat label="Plan" value={d.isPro ? "Pro" : "Free"} href="/app/plans" />
+          <Stat label="Plan" value={PLAN_LIMITS[d.plan].name} href="/app/plans" />
         </s-grid>
       </s-section>
 
-      <s-grid gridTemplateColumns="repeat(12, 1fr)" gap="base">
-        <s-grid-item gridColumn="span 7">
-          <s-section heading="Setup">
+      <s-section heading="Setup">
+        <s-grid gridTemplateColumns="repeat(12, 1fr)" gap="large-100">
+          <s-grid-item gridColumn="span 7">
             <s-stack direction="block" gap="base">
               <Step n="1" title="Sync your catalog" done={d.synced} href="/app/sync" cta="Open Index" />
               <Step n="2" title="Turn the app on in your theme" href={d.themeEditorUrl} cta="Open theme editor" external />
               <Step n="3" title="Optional: place blocks yourself" href={d.themeEditorUrl} cta="Add a block" external />
             </s-stack>
-          </s-section>
-        </s-grid-item>
+          </s-grid-item>
 
-        <s-grid-item gridColumn="span 5">
-          <s-section heading="Storefront">
-            <s-stack direction="block" gap="small-200">
-              <s-text color="subdued">
-                Step 2 upgrades your existing search box, replaces the search page
-                with faceted results, and adds filters to collection pages.
-              </s-text>
-              <s-text color="subdued">
-                Blocks you place by hand always win over the automatic version.
-              </s-text>
-            </s-stack>
-          </s-section>
-        </s-grid-item>
-      </s-grid>
+          <s-grid-item gridColumn="span 5">
+            <s-box padding="base" borderWidth="base" borderRadius="base">
+              <s-stack direction="block" gap="small-300">
+                <s-text type="strong">What step 2 changes</s-text>
+                <s-text color="subdued">
+                  It upgrades your existing search box, replaces the search page
+                  with faceted results, and adds filters to collection pages.
+                </s-text>
+                <s-text color="subdued">
+                  Blocks you place by hand always win over the automatic version.
+                </s-text>
+              </s-stack>
+            </s-box>
+          </s-grid-item>
+        </s-grid>
+      </s-section>
 
       <s-section heading="Search visibility">
-        <s-grid gridTemplateColumns={CARDS} gap="base">
+        <s-grid gridTemplateColumns={CARDS} gap="large-100">
           <Card
             title="Crawlable results"
             badge="Included"
@@ -147,12 +150,12 @@ export default function Dashboard() {
           />
           <Card
             title="AI product feed"
-            badge={d.isPro ? "Active" : "Pro"}
-            tone={d.isPro ? "success" : "info"}
+            badge={d.aiFeed ? "Active" : "Pro"}
+            tone={d.aiFeed ? "success" : "info"}
             blurb="schema.org products for assistants that shop on a customer's behalf."
-            linkLabel={d.isPro ? "View feed" : "See Pro"}
-            href={d.isPro ? d.storefront.aiFeed : "/app/plans"}
-            external={d.isPro}
+            linkLabel={d.aiFeed ? "View feed" : "See Pro"}
+            href={d.aiFeed ? d.storefront.aiFeed : "/app/plans"}
+            external={d.aiFeed}
           />
           <Card
             title="Search to cart"
@@ -166,7 +169,7 @@ export default function Dashboard() {
       </s-section>
 
       <s-section heading="Pages">
-        <s-grid gridTemplateColumns={CARDS} gap="base">
+        <s-grid gridTemplateColumns={CARDS} gap="large-100">
           {PAGES.map((p) => (
             <s-clickable key={p.href} href={p.href} padding="base" background="subdued" borderRadius="base">
               <s-stack direction="block" gap="small-500">
@@ -233,7 +236,7 @@ function Step({
       <s-grid gridTemplateColumns="auto 1fr auto" gap="base" alignItems="center">
         <s-badge tone={done ? "success" : undefined}>{done ? "Done" : n}</s-badge>
         <s-text type="strong">{title}</s-text>
-        <s-button href={href} variant="tertiary" {...(external ? { target: "_top" } : {})}>
+        <s-button href={href} variant="secondary" {...(external ? { target: "_top" } : {})}>
           {cta}
         </s-button>
       </s-grid>

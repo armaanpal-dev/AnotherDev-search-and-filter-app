@@ -29,7 +29,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin, billing } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
-  const { limits } = await getPlanStatus(billing);
+  const { limits } = await getPlanStatus(billing, shop.planOverride);
 
   // Double-clicking the button used to start a second sync that fought the first
   // for the same rows. `runFullSync` refuses when a live run exists, but check

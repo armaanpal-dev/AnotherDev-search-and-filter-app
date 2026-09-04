@@ -80,7 +80,7 @@ export default function FiltersPage() {
   return (
     <s-page heading="Filters">
       <s-section heading="Overview">
-        <s-grid gridTemplateColumns={TILES} gap="base">
+        <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Stat label="Shown to shoppers" value={String(on)} />
           <Stat label="Configured" value={String(filters.length)} />
           <Stat
@@ -103,14 +103,14 @@ export default function FiltersPage() {
                       <input type="hidden" name="intent" value="toggle" />
                       <input type="hidden" name="id" value={f.id} />
                       <input type="hidden" name="enabled" value={String(!f.enabled)} />
-                      <s-button type="submit" variant="tertiary">
+                      <s-button type="submit" variant="secondary">
                         {f.enabled ? "Hide" : "Show"}
                       </s-button>
                     </fetcher.Form>
                     <fetcher.Form method="post">
                       <input type="hidden" name="intent" value="delete" />
                       <input type="hidden" name="id" value={f.id} />
-                      <s-button type="submit" variant="tertiary" tone="critical">
+                      <s-button type="submit" variant="secondary" tone="critical">
                         Remove
                       </s-button>
                     </fetcher.Form>

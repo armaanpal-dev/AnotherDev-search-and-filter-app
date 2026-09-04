@@ -24,7 +24,8 @@ const CONDITION_FIELDS = [
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
-  const { isPro } = await getPlanStatus(billing);
+  const { limits } = await getPlanStatus(billing, shop.planOverride);
+  const isPro = limits.merchandising;
   const [rules, redirects, optionNames] = await Promise.all([
     prisma.merchandisingRule.findMany({ where: { shopId: shop.id }, orderBy: { priority: "desc" } }),
     prisma.redirect.findMany({ where: { shopId: shop.id }, orderBy: { createdAt: "desc" } }),
@@ -46,9 +47,11 @@ async function discoverOptionNames(shopId: string): Promise<string[]> {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
-  // Merchandising is a Pro feature — reject writes on Free.
-  const { isPro } = await getPlanStatus(billing);
-  if (!isPro) return { error: "Merchandising is a Pro feature." };
+  // Gate on the capability so the tier boundary lives in one place.
+  const { limits } = await getPlanStatus(billing, shop.planOverride);
+  if (!limits.merchandising) {
+    return { error: "Merchandising is available on the Growth and Pro plans." };
+  }
   const form = await request.formData();
   const intent = form.get("intent");
 
@@ -170,14 +173,14 @@ export default function MerchandisingPage() {
                         <input type="hidden" name="intent" value="toggleRule" />
                         <input type="hidden" name="id" value={r.id} />
                         <input type="hidden" name="active" value={String(!r.active)} />
-                        <s-button type="submit" variant="tertiary">
+                        <s-button type="submit" variant="secondary">
                           {r.active ? "Pause" : "Activate"}
                         </s-button>
                       </fetcher.Form>
                       <fetcher.Form method="post">
                         <input type="hidden" name="intent" value="deleteRule" />
                         <input type="hidden" name="id" value={r.id} />
-                        <s-button type="submit" variant="tertiary" tone="critical">Delete</s-button>
+                        <s-button type="submit" variant="secondary" tone="critical">Delete</s-button>
                       </fetcher.Form>
                     </>
                   }
@@ -264,7 +267,7 @@ export default function MerchandisingPage() {
             ))}
             <s-button
               type="button"
-              variant="tertiary"
+              variant="secondary"
               onClick={() => setConditionRows((r) => [...r, (r[r.length - 1] ?? 0) + 1])}
             >
               Add another condition
@@ -299,7 +302,7 @@ export default function MerchandisingPage() {
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="deleteRedirect" />
                     <input type="hidden" name="id" value={r.id} />
-                    <s-button type="submit" variant="tertiary" tone="critical">Delete</s-button>
+                    <s-button type="submit" variant="secondary" tone="critical">Delete</s-button>
                   </fetcher.Form>
                 }
               >
@@ -361,7 +364,7 @@ function ProductPicker({ name, label }: { name: string; label: string }) {
     <s-stack direction="block" gap="small">
       <input type="hidden" name={name} value={selected.map((s) => s.id).join(",")} />
       <s-stack direction="inline" gap="base" alignItems="center">
-        <s-button type="button" variant="tertiary" onClick={pick}>{label}</s-button>
+        <s-button type="button" variant="secondary" onClick={pick}>{label}</s-button>
         <s-text color="subdued">
           {selected.length
             ? selected.map((s) => s.title).join(", ")

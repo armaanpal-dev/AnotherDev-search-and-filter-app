@@ -10,7 +10,7 @@ import { Stat, Row, Bar, Empty, TILES, WIDE } from "../components/ui";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
-  const { isPro, limits } = await getPlanStatus(billing);
+  const { plan, limits } = await getPlanStatus(billing, shop.planOverride);
 
   // The window comes from the plan. This page used to hardcode 30 days, so Free
   // shops saw more history than they were sold and Pro shops saw a third of theirs.
@@ -26,7 +26,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  return { ...summary, isPro };
+  return { ...summary, plan };
 };
 
 export default function AnalyticsPage() {
@@ -42,7 +42,7 @@ export default function AnalyticsPage() {
       </s-button>
 
       <s-section heading={`Last ${d.windowDays} days`}>
-        <s-grid gridTemplateColumns={TILES} gap="base">
+        <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Stat label="Searches" value={d.total.toLocaleString()} />
           <Stat label="Click-through" value={`${d.ctr}%`} />
           <Stat label="Add to cart" value={`${d.cartRate}%`} />
@@ -53,10 +53,10 @@ export default function AnalyticsPage() {
             hint={d.zeroRate > 10 ? "High" : undefined}
           />
         </s-grid>
-        {!d.isPro && (
+        {d.plan !== "pro" && (
           <s-box padding="base" background="subdued" borderRadius="base">
             <s-text color="subdued">
-              Free shows {d.windowDays} days.{" "}
+              This plan shows {d.windowDays} days.{" "}
               <s-link href="/app/plans">Pro</s-link> extends this to 90.
             </s-text>
           </s-box>
@@ -109,7 +109,7 @@ export default function AnalyticsPage() {
         )}
       </s-section>
 
-      <s-grid gridTemplateColumns={WIDE} gap="base">
+      <s-grid gridTemplateColumns={WIDE} gap="large-100">
         <s-grid-item>
           <s-section heading="Found nothing">
             <s-text color="subdued">
@@ -123,13 +123,13 @@ export default function AnalyticsPage() {
                     actions={
                       <>
                         <s-button
-                          variant="tertiary"
+                          variant="secondary"
                           href={`/app/synonyms?prefill=${encodeURIComponent(z.term)}`}
                         >
                           Synonym
                         </s-button>
                         <s-button
-                          variant="tertiary"
+                          variant="secondary"
                           href={`/app/merchandising?redirect=${encodeURIComponent(z.term)}`}
                         >
                           Redirect
@@ -161,7 +161,7 @@ export default function AnalyticsPage() {
                     key={z.term}
                     actions={
                       <s-button
-                        variant="tertiary"
+                        variant="secondary"
                         href={`/app/merchandising?query=${encodeURIComponent(z.term)}`}
                       >
                         Merchandise

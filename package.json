@@ -24,7 +24,8 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "test:all": "npm test && npm run test:integration && npm run test:edge"
+    "test:all": "npm test && npm run test:integration && npm run test:edge",
+    "plan": "node scripts/set-plan.mjs"
   },
   "type": "module",
   "engines": {

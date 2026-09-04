@@ -18,7 +18,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // features without a billing round-trip. The app_subscriptions/update webhook
   // handles changes between visits; this covers the first visit and any webhook
   // that was missed.
-  const { plan } = await getPlanStatus(billing);
+  // planOverride wins over billing, and the sync below must not undo it.
+  const { plan } = await getPlanStatus(billing, shop.planOverride);
   if (shop.planName !== plan) {
     await prisma.shop.update({ where: { id: shop.id }, data: { planName: plan } });
     invalidateShopConfig(shop.id);

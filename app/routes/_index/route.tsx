@@ -10,10 +10,18 @@ import styles from "./styles.module.css";
 // card in the admin), and asking a merchant to type their .myshopify.com domain
 // is not permitted. A request that already carries `?shop=` came from Shopify,
 // so it goes straight into the embedded app and OAuth runs there.
+// Any of these means the request came from inside the Shopify admin.
+//
+// Keying only off the shop param was too narrow: clicking the app name in the
+// admin sidebar loads the app root with host and embedded, but not always
+// shop, so the public marketing page rendered inside the admin frame instead
+// of the dashboard.
+const EMBEDDED_MARKERS = ["shop", "host", "embedded", "id_token", "session"];
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
-  if (url.searchParams.get("shop")) {
+  if (EMBEDDED_MARKERS.some((k) => url.searchParams.get(k))) {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 

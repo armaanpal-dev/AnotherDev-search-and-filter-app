@@ -14,7 +14,8 @@ import { TILES } from "../components/ui";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
-  const { isPro } = await getPlanStatus(billing);
+  const { limits } = await getPlanStatus(billing, shop.planOverride);
+  const isPro = limits.semantic;
   return {
     settings: resolveSettings(shop.settings),
     domain: shop.domain,
@@ -125,7 +126,7 @@ export default function SettingsPage() {
       </s-button>
 
       <s-section heading="Currently live">
-        <s-grid gridTemplateColumns={TILES} gap="base">
+        <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Live label="Instant search" on={s.autoAttach} />
           <Live label="Search page" on={s.searchTakeover} />
           <Live label="Collection filters" on={s.collectionFilters} />
