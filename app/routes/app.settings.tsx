@@ -153,7 +153,7 @@ export default function SettingsPage() {
         {/* s-page only spaces its DIRECT s-section children. With the form in
             between, every section card stacked flush against the next, so the
             gap has to be supplied here. */}
-        <s-stack direction="block" gap="large-100">
+        <s-stack direction="block" gap="large-500">
         <s-section heading="Behaviour">
           <s-stack direction="block" gap="base">
             <Check name="autoAttach" checked={s.autoAttach} label="Upgrade my theme's search box with instant results" />

@@ -1271,6 +1271,11 @@
       decodeURIComponent((fromPath && fromPath[1]) || "");
     if (!handle) return false;
 
+    // /collections/all is Shopify’s virtual "everything" collection. No product
+    // is actually a member of it, so scoping a search to the handle "all" can
+    // only ever return nothing. Treat it as an unscoped browse instead.
+    var scope = handle === "all" ? "" : handle;
+
     // Only ever replace the grid section. If this theme lays its collection out
     // in a way we do not recognise, leave the page completely alone — silently
     // rendering nothing beats deleting the merchant's content.
@@ -1284,7 +1289,10 @@
     // is exactly what happened when collection membership was missing from the
     // index. An unfiltered collection that we believe is empty means OUR data
     // is wrong, not the store, so we leave the page alone.
-    var probe = cfg.proxy + "/search?perPage=1&collection=" + encodeURIComponent(handle);
+    var probe =
+      cfg.proxy +
+      "/search?perPage=1" +
+      (scope ? "&collection=" + encodeURIComponent(scope) : "");
     fetch(probe, { headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -1292,7 +1300,7 @@
         var mount = el("div", "adsf-app");
         mount.setAttribute("data-adsf-results-app", "");
         mount.setAttribute("data-proxy", cfg.proxy);
-        mount.setAttribute("data-collection", handle);
+        if (scope) mount.setAttribute("data-collection", scope);
         mount.setAttribute("data-per-page", String(cfg.resultsPerPage || 24));
         if (cfg.moneyFormat) mount.setAttribute("data-money-format", cfg.moneyFormat);
         mount.style.setProperty("--adsf-cols", String(cfg.gridColumns || 4));
