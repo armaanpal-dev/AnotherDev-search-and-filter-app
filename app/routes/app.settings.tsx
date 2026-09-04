@@ -9,6 +9,7 @@ import { resolveSettings, mergeSettings } from "../lib/settings";
 import { getPlanStatus } from "../lib/billing.server";
 import { semanticReady } from "../lib/search/embeddings.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
+import { TILES } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
@@ -122,6 +123,17 @@ export default function SettingsPage() {
       >
         Save
       </s-button>
+
+      <s-section heading="Currently live">
+        <s-grid gridTemplateColumns={TILES} gap="base">
+          <Live label="Instant search" on={s.autoAttach} />
+          <Live label="Search page" on={s.searchTakeover} />
+          <Live label="Collection filters" on={s.collectionFilters} />
+          <Live label="Typo tolerance" on={s.typoTolerance} />
+          <Live label="Quick add to cart" on={s.quickAdd} />
+        </s-grid>
+        <s-text color="subdued">Storefront: {domain}</s-text>
+      </s-section>
 
       <fetcher.Form method="post" id="adsf-settings">
         <s-section heading="Behaviour">
@@ -282,6 +294,17 @@ function Check({
 // s-color-field pairs a swatch picker with a validated hex input, replacing a
 // raw <input type="color"> that had to be wired to a text field by hand and
 // carried inline styles Polaris cannot theme.
+function Live({ label, on }: { label: string; on: boolean }) {
+  return (
+    <s-box padding="base" background="subdued" borderRadius="base">
+      <s-stack direction="block" gap="small-500">
+        <s-text color="subdued">{label}</s-text>
+        <s-badge tone={on ? "success" : undefined}>{on ? "On" : "Off"}</s-badge>
+      </s-stack>
+    </s-box>
+  );
+}
+
 function ColorField({ name, label, value }: { name: string; label: string; value: string }) {
   return <s-color-field name={name} label={label} defaultValue={value} />;
 }

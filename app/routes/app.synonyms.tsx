@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
+import { Stat, Card, Row, Empty, TILES, CARDS } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -44,59 +45,107 @@ export default function SynonymsPage() {
   const fetcher = useFetcher();
   const [sp] = useSearchParams();
   const prefill = sp.get("prefill") ?? "";
+  const multi = synonyms.filter((s) => s.type !== "oneway").length;
 
   return (
     <s-page heading="Synonyms">
-      <s-section heading="Add a synonym group">
-        <s-paragraph>
-          <s-text color="subdued">
-            Multi-way: all terms are interchangeable (e.g. “sneaker, trainer, running shoe”).
-            One-way: an input maps to extra terms but not the reverse.
-          </s-text>
-        </s-paragraph>
+      <s-section heading="Overview">
+        <s-grid gridTemplateColumns={TILES} gap="base">
+          <Stat label="Groups" value={String(synonyms.length)} />
+          <Stat label="Interchangeable" value={String(multi)} />
+          <Stat label="One-way" value={String(synonyms.length - multi)} />
+        </s-grid>
+      </s-section>
+
+      <s-section heading="Add a group">
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="create" />
           <s-stack direction="block" gap="base">
-            <s-select name="type" label="Type" value="multiway">
-              <s-option value="multiway">Multi-way (interchangeable)</s-option>
-              <s-option value="oneway">One-way (input maps to terms)</s-option>
-            </s-select>
-            <s-text-field name="input" label="Input term (one-way only)" defaultValue={prefill} />
-            <s-text-field
-              name="terms"
-              label="Terms (comma-separated)"
-              defaultValue={prefill}
-            />
-            <s-button variant="primary" type="submit" {...(fetcher.state !== "idle" ? { loading: true } : {})}>
-              Add synonym
+            <s-grid gridTemplateColumns="1fr 1fr 2fr" gap="base" alignItems="end">
+              <s-select name="type" label="Type" value="multiway">
+                <s-option value="multiway">Interchangeable</s-option>
+                <s-option value="oneway">One-way</s-option>
+              </s-select>
+              <s-text-field
+                name="input"
+                label="Input term"
+                details="One-way only"
+                defaultValue={prefill}
+              />
+              <s-text-field
+                name="terms"
+                label="Terms"
+                details="Comma separated"
+                defaultValue={prefill}
+              />
+            </s-grid>
+            <s-button
+              variant="primary"
+              type="submit"
+              {...(fetcher.state !== "idle" ? { loading: true } : {})}
+            >
+              Add group
             </s-button>
           </s-stack>
         </fetcher.Form>
+
+        <s-grid gridTemplateColumns={CARDS} gap="base">
+          <Card title="Interchangeable">
+            <s-text color="subdued">
+              Every term finds the others. Searching sneaker also returns trainer
+              and running shoe.
+            </s-text>
+          </Card>
+          <Card title="One-way">
+            <s-text color="subdued">
+              The input finds the terms, but not the reverse. Useful when a broad
+              word should reach a narrow one without dragging it back.
+            </s-text>
+          </Card>
+        </s-grid>
       </s-section>
 
-      <s-section heading={`Synonym groups (${synonyms.length})`}>
+      <s-section heading="Groups">
         {synonyms.length ? (
-          <s-stack direction="block" gap="small">
+          <s-stack direction="block" gap="small-300">
             {synonyms.map((s) => (
-              <s-box key={s.id} padding="base" borderWidth="base" borderRadius="base">
-                <s-stack direction="inline" gap="base" alignItems="center">
-                  <s-badge>{s.type}</s-badge>
-                  <s-text>
-                    {s.type === "oneway" ? `${s.input} maps to ` : ""}
-                    {s.terms.join(", ")}
-                  </s-text>
-                  <fetcher.Form method="post" style={{ marginInlineStart: "auto" }}>
+              <Row
+                key={s.id}
+                actions={
+                  <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="delete" />
                     <input type="hidden" name="id" value={s.id} />
-                    <s-button type="submit" variant="tertiary" tone="critical">Delete</s-button>
+                    <s-button type="submit" variant="tertiary" tone="critical">
+                      Delete
+                    </s-button>
                   </fetcher.Form>
+                }
+              >
+                <s-stack direction="inline" gap="small-500" alignItems="center">
+                  <s-badge tone={s.type === "oneway" ? "info" : "success"}>
+                    {s.type === "oneway" ? "One-way" : "Interchangeable"}
+                  </s-badge>
+                  {s.type === "oneway" && <s-text type="strong">{s.input}</s-text>}
                 </s-stack>
-              </s-box>
+                <s-text color="subdued">{s.terms.join(", ")}</s-text>
+              </Row>
             ))}
           </s-stack>
         ) : (
-          <s-paragraph><s-text color="subdued">No synonyms yet.</s-text></s-paragraph>
+          <Empty heading="No synonyms yet">
+            Start with the terms that returned nothing. Analytics lists them.
+          </Empty>
         )}
+      </s-section>
+
+      <s-section slot="aside" heading="Where to start">
+        <s-paragraph>
+          <s-text color="subdued">
+            Your <s-link href="/app/analytics">zero-result searches</s-link> are
+            the best source of synonyms. Each one is a word a shopper used that
+            your catalog does not.
+          </s-text>
+        </s-paragraph>
       </s-section>
     </s-page>
   );

@@ -6,6 +6,7 @@ import { getPlanStatus, PLAN_LIMITS, isTestBilling } from "../lib/billing.server
 import { semanticReady } from "../lib/search/embeddings.server";
 import prisma from "../db.server";
 import { getShopByDomain } from "../lib/shop.server";
+import { Stat, TILES, WIDE } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, session } = await authenticate.admin(request);
@@ -99,83 +100,103 @@ export default function PlansPage() {
     : PRO_FEATURES;
 
   return (
-    <s-page heading="Plans & pricing">
+    <s-page heading="Plans and pricing">
       {declined && (
-        <s-banner tone="warning" heading="The charge wasn't approved">
+        <s-banner tone="warning" heading="The charge was not approved">
           <s-paragraph>
-            You&rsquo;re still on the Free plan. Nothing has been billed. Start
-            the 14-day trial again whenever you&rsquo;re ready.
+            You are still on Free and nothing has been billed. Start the trial
+            again whenever you are ready.
           </s-paragraph>
         </s-banner>
       )}
 
       {overFreeLimit && !isPro && (
-        <s-banner tone="warning" heading="You're over the Free plan limit">
+        <s-banner tone="warning" heading="Your catalog is larger than Free indexes">
           <s-paragraph>
-            You have {productCount} products but Free indexes up to {freeLimit}.
-            Upgrade to Pro to index your whole catalog.
+            {productCount.toLocaleString()} products, and Free indexes{" "}
+            {freeLimit.toLocaleString()}. The rest are not searchable.
           </s-paragraph>
         </s-banner>
       )}
 
-      <s-stack direction="inline" gap="large">
-        {/* Free */}
-        <s-box padding="large" borderWidth="base" borderRadius="base" minInlineSize="300px">
-          <s-stack direction="block" gap="base">
-            <s-heading>Free</s-heading>
-            <s-text type="strong">$0/month</s-text>
-            {!isPro ? (
-              <s-badge tone="success">Current plan</s-badge>
-            ) : (
-              <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="downgrade" />
-                <s-button type="submit" variant="tertiary" {...(busy ? { loading: true } : {})}>
-                  Downgrade to Free
-                </s-button>
-              </fetcher.Form>
-            )}
-            <s-unordered-list>
-              {FREE_FEATURES.map((f) => (
-                <s-list-item key={f}>{f}</s-list-item>
-              ))}
-            </s-unordered-list>
-          </s-stack>
-        </s-box>
+      <s-section heading="Your usage">
+        <s-grid gridTemplateColumns={TILES} gap="base">
+          <Stat label="Current plan" value={isPro ? "Pro" : "Free"} />
+          <Stat
+            label="Products indexed"
+            value={productCount.toLocaleString()}
+            tone={overFreeLimit && !isPro ? "critical" : undefined}
+            hint={overFreeLimit && !isPro ? "Over limit" : undefined}
+          />
+          <Stat
+            label="Indexing limit"
+            value={isPro ? "Unlimited" : freeLimit.toLocaleString()}
+          />
+        </s-grid>
+      </s-section>
 
-        {/* Pro */}
-        <s-box padding="large" borderWidth="base" borderRadius="base" minInlineSize="300px" background="subdued">
-          <s-stack direction="block" gap="base">
-            <s-stack direction="inline" gap="base" alignItems="center">
-              <s-heading>Pro</s-heading>
-              <s-badge tone="info">14-day free trial</s-badge>
+      <s-grid gridTemplateColumns={WIDE} gap="base">
+        <s-grid-item>
+          <s-section heading="Free">
+            <s-stack direction="block" gap="base">
+              <s-stack direction="inline" gap="small-500" alignItems="center">
+                <s-heading>$0</s-heading>
+                <s-text color="subdued">per month</s-text>
+                {!isPro && <s-badge tone="success">Current</s-badge>}
+              </s-stack>
+              {isPro && (
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="downgrade" />
+                  <s-button type="submit" variant="tertiary" {...(busy ? { loading: true } : {})}>
+                    Downgrade to Free
+                  </s-button>
+                </fetcher.Form>
+              )}
+              <s-unordered-list>
+                {FREE_FEATURES.map((f) => (
+                  <s-list-item key={f}>{f}</s-list-item>
+                ))}
+              </s-unordered-list>
             </s-stack>
-            <s-text type="strong">$9.99/month</s-text>
-            {isPro ? (
-              <s-badge tone="success">Current plan</s-badge>
-            ) : (
-              <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="upgrade" />
-                <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>
-                  Start free trial
-                </s-button>
-              </fetcher.Form>
-            )}
-            <s-unordered-list>
-              {proFeatures.map((f) => (
-                <s-list-item key={f}>{f}</s-list-item>
-              ))}
-            </s-unordered-list>
-          </s-stack>
-        </s-box>
-      </s-stack>
+          </s-section>
+        </s-grid-item>
 
-      <s-section slot="aside" heading="Why Pro?">
+        <s-grid-item>
+          <s-section heading="Pro">
+            <s-stack direction="block" gap="base">
+              <s-stack direction="inline" gap="small-500" alignItems="center">
+                <s-heading>$9.99</s-heading>
+                <s-text color="subdued">per month</s-text>
+                {isPro ? (
+                  <s-badge tone="success">Current</s-badge>
+                ) : (
+                  <s-badge tone="info">14-day trial</s-badge>
+                )}
+              </s-stack>
+              {!isPro && (
+                <fetcher.Form method="post">
+                  <input type="hidden" name="intent" value="upgrade" />
+                  <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>
+                    Start free trial
+                  </s-button>
+                </fetcher.Form>
+              )}
+              <s-unordered-list>
+                {proFeatures.map((f) => (
+                  <s-list-item key={f}>{f}</s-list-item>
+                ))}
+              </s-unordered-list>
+            </s-stack>
+          </s-section>
+        </s-grid-item>
+      </s-grid>
+
+      <s-section slot="aside" heading="Billing">
         <s-paragraph>
           <s-text color="subdued">
-            Pro pays for itself the moment search-driven conversions rise. You get
-            merchandising control, unlimited catalog size, and the AI feed that puts
-            your products in front of AI shopping assistants — all for less than most
-            competitors charge for their entry tier.
+            Charges are handled by Shopify and appear on your normal Shopify
+            invoice. Cancelling is immediate and prorated, and your index stays
+            in place, capped back to the Free limit.
           </s-text>
         </s-paragraph>
       </s-section>

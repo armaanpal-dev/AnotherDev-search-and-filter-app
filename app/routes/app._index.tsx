@@ -19,26 +19,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     `https://${session.shop}/admin/themes/current/editor` +
     `?context=apps&activateAppId=${process.env.SHOPIFY_API_KEY}/app-embed`;
 
-  // The storefront surfaces this app adds, on the merchant's own domain. These
-  // are real, visitable URLs — showing them is the only honest way to claim the
-  // SEO and AI-feed features, because the merchant can go and check them.
+  // Real, visitable URLs on the merchant's own domain. Linking them is the only
+  // honest way to claim the SEO and AI-feed features: they can go and check.
   const storefront = {
     results: `https://${session.shop}/apps/anotherdev-search/results`,
     aiFeed: `https://${session.shop}/apps/anotherdev-search/ai`,
   };
 
-  if (!shop) {
-    return {
-      productCount: 0,
-      synced: false,
-      searches7d: 0,
-      zeroCount: 0,
-      clicks7d: 0,
-      isPro,
-      themeEditorUrl,
-      storefront,
-    };
-  }
+  const empty = {
+    productCount: 0,
+    synced: false,
+    searches7d: 0,
+    zeroCount: 0,
+    clicks7d: 0,
+    isPro,
+    themeEditorUrl,
+    storefront,
+  };
+  if (!shop) return empty;
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const [productCount, syncState, searches7d, zeroCount, clicks7d] = await Promise.all([
@@ -52,82 +50,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   return {
+    ...empty,
     productCount,
     synced: !!syncState?.lastSyncAt,
     searches7d,
     zeroCount,
     clicks7d,
-    isPro,
-    themeEditorUrl,
-    storefront,
   };
 };
 
-// Each admin page, in plain language. `pro` marks pages whose writes are gated.
-const PAGES = [
-  {
-    href: "/app/sync",
-    title: "Index",
-    what: "Pull your catalog into the search engine.",
-    why: "Nothing is searchable until you sync. After the first sync, product edits update automatically through webhooks.",
-  },
-  {
-    href: "/app/filters",
-    title: "Filters",
-    what: "Choose which filters shoppers see: price, brand, type, colour, size, tags.",
-    why: "Filters are the strongest lever on search-to-purchase for collection and results pages.",
-  },
-  {
-    href: "/app/synonyms",
-    title: "Synonyms",
-    what: "Teach search that different words mean the same thing, such as sneaker and trainer.",
-    why: "Turns zero-result searches into sales. Shoppers rarely use your exact product wording.",
-  },
-  {
-    href: "/app/merchandising",
-    title: "Merchandising",
-    what: "Pin, boost, bury or hide products for specific searches, and set redirects.",
-    why: "Control what shows first: promote new arrivals, move overstock, hide out-of-season items.",
-    pro: true,
-  },
-  {
-    href: "/app/analytics",
-    title: "Analytics",
-    what: "Top searches, zero-result searches, click-through and add-to-cart rates.",
-    why: "Tells you what shoppers want, and where search is failing them.",
-  },
-  {
-    href: "/app/plans",
-    title: "Plans",
-    what: "Free covers up to 100 products. Pro unlocks unlimited plus merchandising.",
-    why: "Upgrade only when you outgrow Free.",
-  },
-  {
-    href: "/app/settings",
-    title: "Settings",
-    what: "Instant search, search-page takeover, collection filters, typo tolerance, quick add to cart, colours and swatches.",
-    why: "Everything about the storefront widget lives here rather than in the theme editor.",
-  },
+// One line each. The dashboard is a map, not a manual.
+const PAGES: { href: string; title: string; blurb: string; pro?: boolean }[] = [
+  { href: "/app/sync", title: "Index", blurb: "Pull your catalog into the search engine." },
+  { href: "/app/filters", title: "Filters", blurb: "Choose the filters shoppers see." },
+  { href: "/app/synonyms", title: "Synonyms", blurb: "Teach search that words mean the same thing." },
+  { href: "/app/merchandising", title: "Merchandising", blurb: "Pin, boost, bury, hide, redirect.", pro: true },
+  { href: "/app/analytics", title: "Analytics", blurb: "Top terms, dead ends, click-through." },
+  { href: "/app/plans", title: "Plans", blurb: "Free to 100 products. Pro for the rest." },
+  { href: "/app/settings", title: "Settings", blurb: "Behaviour, layout, colours, swatches." },
 ];
 
+// Responsive without media queries: tiles wrap when the column runs out of room.
+const TILES = "repeat(auto-fit, minmax(170px, 1fr))";
+const CARDS = "repeat(auto-fit, minmax(260px, 1fr))";
+
 export default function Dashboard() {
-  const data = useLoaderData<typeof loader>();
-  const ctr = data.searches7d
-    ? Math.round((data.clicks7d / data.searches7d) * 1000) / 10
-    : 0;
+  const d = useLoaderData<typeof loader>();
+  const ctr = d.searches7d ? Math.round((d.clicks7d / d.searches7d) * 1000) / 10 : 0;
 
   return (
     <s-page heading="AnotherDev Search and Filters">
       <s-button slot="primary-action" href="/app/sync" variant="primary">
-        {data.synced ? "Manage index" : "Run first sync"}
+        {d.synced ? "Manage index" : "Run first sync"}
       </s-button>
 
-      {!data.synced && (
+      {!d.synced && (
         <s-banner tone="warning" heading="Your catalog is not indexed yet">
-          <s-paragraph>
-            Shoppers will not see any results until the first sync finishes. It
-            usually takes a couple of minutes.
-          </s-paragraph>
+          <s-paragraph>Shoppers see no results until the first sync finishes.</s-paragraph>
           <s-button slot="primary-action" href="/app/sync" variant="primary">
             Run first sync
           </s-button>
@@ -135,190 +94,181 @@ export default function Dashboard() {
       )}
 
       <s-section heading="Last 7 days">
-        <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr" gap="base">
-          <Metric label="Products indexed" value={data.productCount.toLocaleString()} />
-          <Metric label="Searches" value={data.searches7d.toLocaleString()} />
-          <Metric label="Zero results" value={data.zeroCount.toLocaleString()} />
-          <Metric label="Click-through rate" value={`${ctr}%`} />
+        <s-grid gridTemplateColumns={TILES} gap="base">
+          <Stat label="Products indexed" value={d.productCount.toLocaleString()} />
+          <Stat label="Searches" value={d.searches7d.toLocaleString()} />
+          <Stat
+            label="Zero results"
+            value={d.zeroCount.toLocaleString()}
+            tone={d.zeroCount > 0 ? "critical" : undefined}
+            href={d.zeroCount > 0 ? "/app/analytics" : undefined}
+          />
+          <Stat label="Click-through" value={`${ctr}%`} />
+          <Stat label="Plan" value={d.isPro ? "Pro" : "Free"} href="/app/plans" />
         </s-grid>
-        <s-paragraph>
-          <s-text color="subdued">
-            Zero-result searches are the fastest thing to fix. Each one is a
-            shopper who wanted something and was shown nothing.{" "}
-            <s-link href="/app/analytics">See which terms failed</s-link>.
-          </s-text>
-        </s-paragraph>
       </s-section>
 
-      <s-section heading="Setup">
-        <s-ordered-list>
-          <s-list-item>
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-text type="strong">Sync your catalog.</s-text>
-              {data.synced ? (
-                <s-badge tone="success">Done</s-badge>
-              ) : (
-                <s-badge tone="warning">To do</s-badge>
-              )}
+      <s-grid gridTemplateColumns="repeat(12, 1fr)" gap="base">
+        <s-grid-item gridColumn="span 7">
+          <s-section heading="Setup">
+            <s-stack direction="block" gap="base">
+              <Step n="1" title="Sync your catalog" done={d.synced} href="/app/sync" cta="Open Index" />
+              <Step n="2" title="Turn the app on in your theme" href={d.themeEditorUrl} cta="Open theme editor" external />
+              <Step n="3" title="Optional: place blocks yourself" href={d.themeEditorUrl} cta="Add a block" external />
             </s-stack>
-            <s-paragraph>
-              <s-text color="subdued">
-                Open <s-link href="/app/sync">Index</s-link> and run the first
-                sync. Product edits stay up to date automatically after that.
-              </s-text>
-            </s-paragraph>
-          </s-list-item>
+          </s-section>
+        </s-grid-item>
 
-          <s-list-item>
-            <s-text type="strong">Turn the app on in your theme.</s-text>
-            <s-paragraph>
+        <s-grid-item gridColumn="span 5">
+          <s-section heading="Storefront">
+            <s-stack direction="block" gap="small-200">
               <s-text color="subdued">
-                <s-link href={data.themeEditorUrl} target="_top">
-                  Open the theme editor with the app embed switched on
-                </s-link>
-                , then click Save. That one switch upgrades your existing search
-                box, replaces your search page with faceted results, and adds
-                filters to collection pages. There are no blocks to place.
+                Step 2 upgrades your existing search box, replaces the search page
+                with faceted results, and adds filters to collection pages.
               </s-text>
-            </s-paragraph>
-          </s-list-item>
-
-          <s-list-item>
-            <s-text type="strong">Optional: place blocks yourself.</s-text>
-            <s-paragraph>
               <s-text color="subdued">
-                In the theme editor, use Add section or Add block and choose
-                AnotherDev Search Bar, AnotherDev Search Results, or AnotherDev
-                Recommended. A block you place always takes priority over the
-                automatic version.
+                Blocks you place by hand always win over the automatic version.
               </s-text>
-            </s-paragraph>
-          </s-list-item>
-        </s-ordered-list>
-      </s-section>
+            </s-stack>
+          </s-section>
+        </s-grid-item>
+      </s-grid>
 
       <s-section heading="Search visibility">
-        <s-paragraph>
-          Three things this app does beyond the search box itself. Each one is a
-          real URL on your own domain, so you can open it and check.
-        </s-paragraph>
-
-        <s-stack direction="block" gap="base">
-          <s-box padding="base" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small-200">
-              <s-stack direction="inline" gap="small-200" alignItems="center">
-                <s-text type="strong">Crawlable results page</s-text>
-                <s-badge tone="success">Included</s-badge>
-              </s-stack>
-              <s-text color="subdued">
-                Search results render as real HTML inside your theme, with
-                ItemList structured data, a canonical link, and filter links
-                search engines can follow. Filtered pages are marked noindex so
-                they do not compete with your product pages.
-              </s-text>
-              <s-link href={data.storefront.results} target="_blank">
-                {data.storefront.results}
-              </s-link>
-            </s-stack>
-          </s-box>
-
-          <s-box padding="base" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small-200">
-              <s-stack direction="inline" gap="small-200" alignItems="center">
-                <s-text type="strong">Product feed for AI shopping agents</s-text>
-                {data.isPro ? (
-                  <s-badge tone="success">Active</s-badge>
-                ) : (
-                  <s-badge tone="info">Pro</s-badge>
-                )}
-              </s-stack>
-              <s-text color="subdued">
-                A documented JSON endpoint returning schema.org products, so
-                assistants that shop on a customer&rsquo;s behalf can query and
-                refine your catalog directly.
-                {data.isPro
-                  ? ""
-                  : " On the Free plan this endpoint returns an upgrade notice instead of products."}
-              </s-text>
-              {data.isPro ? (
-                <s-link href={data.storefront.aiFeed} target="_blank">
-                  {data.storefront.aiFeed}
-                </s-link>
-              ) : (
-                <s-link href="/app/plans">See the Pro plan</s-link>
-              )}
-            </s-stack>
-          </s-box>
-
-          <s-box padding="base" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small-200">
-              <s-stack direction="inline" gap="small-200" alignItems="center">
-                <s-text type="strong">Search-to-cart tracking</s-text>
-                <s-badge tone="success">Included</s-badge>
-              </s-stack>
-              <s-text color="subdued">
-                Every result click and add to cart is attributed back to the
-                search that produced it, which is what the click-through and
-                add-to-cart rates in Analytics are measured from. Add to cart is
-                the furthest point the storefront can observe, because checkout
-                runs on Shopify&rsquo;s own domain.
-              </s-text>
-              <s-link href="/app/analytics">Open Analytics</s-link>
-            </s-stack>
-          </s-box>
-        </s-stack>
+        <s-grid gridTemplateColumns={CARDS} gap="base">
+          <Card
+            title="Crawlable results"
+            badge="Included"
+            tone="success"
+            blurb="Real HTML in your theme with structured data and followable filter links."
+            linkLabel="View page"
+            href={d.storefront.results}
+            external
+          />
+          <Card
+            title="AI product feed"
+            badge={d.isPro ? "Active" : "Pro"}
+            tone={d.isPro ? "success" : "info"}
+            blurb="schema.org products for assistants that shop on a customer's behalf."
+            linkLabel={d.isPro ? "View feed" : "See Pro"}
+            href={d.isPro ? d.storefront.aiFeed : "/app/plans"}
+            external={d.isPro}
+          />
+          <Card
+            title="Search to cart"
+            badge="Included"
+            tone="success"
+            blurb="Clicks and add-to-carts attributed back to the search that caused them."
+            linkLabel="Open Analytics"
+            href="/app/analytics"
+          />
+        </s-grid>
       </s-section>
 
-      <s-section heading="What each page does">
-        <s-stack direction="block" gap="base">
+      <s-section heading="Pages">
+        <s-grid gridTemplateColumns={CARDS} gap="base">
           {PAGES.map((p) => (
-            <s-box key={p.href} padding="base" borderWidth="base" borderRadius="base">
-              <s-stack direction="block" gap="small-200">
-                <s-stack direction="inline" gap="small-200" alignItems="center">
-                  <s-link href={p.href}>
-                    <s-text type="strong">{p.title}</s-text>
-                  </s-link>
+            <s-clickable key={p.href} href={p.href} padding="base" background="subdued" borderRadius="base">
+              <s-stack direction="block" gap="small-500">
+                <s-stack direction="inline" gap="small-500" alignItems="center">
+                  <s-text type="strong">{p.title}</s-text>
                   {p.pro && <s-badge tone="info">Pro</s-badge>}
                 </s-stack>
-                <s-text>{p.what}</s-text>
-                <s-text color="subdued">{p.why}</s-text>
+                <s-text color="subdued">{p.blurb}</s-text>
               </s-stack>
-            </s-box>
+            </s-clickable>
           ))}
-        </s-stack>
-      </s-section>
-
-      <s-section slot="aside" heading="Where shoppers see it">
-        <s-paragraph>
-          <s-text color="subdued">
-            The search bar sits in your header and shows results as customers
-            type. The results page shows the full grid with filters down the
-            side, and a filter drawer on mobile.
-          </s-text>
-        </s-paragraph>
-      </s-section>
-
-      <s-section slot="aside" heading="Not seeing it in your theme?">
-        <s-paragraph>
-          <s-text color="subdued">
-            Enable the app under App embeds first. The{" "}
-            <s-link href={data.themeEditorUrl} target="_top">theme editor link</s-link>{" "}
-            in step 2 takes you straight there. If a block will not drop into
-            your header, your theme may only allow app blocks in the body. The
-            app embed covers that case on its own.
-          </s-text>
-        </s-paragraph>
+        </s-grid>
       </s-section>
     </s-page>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  tone,
+  href,
+}: {
+  label: string;
+  value: string;
+  tone?: "critical";
+  href?: string;
+}) {
+  const body = (
+    <s-stack direction="block" gap="small-500">
+      <s-text color="subdued">{label}</s-text>
+      <s-heading>{value}</s-heading>
+      {tone === "critical" && <s-badge tone="critical">Needs attention</s-badge>}
+    </s-stack>
+  );
+  return href ? (
+    <s-clickable href={href} padding="base" background="subdued" borderRadius="base">
+      {body}
+    </s-clickable>
+  ) : (
+    <s-box padding="base" background="subdued" borderRadius="base">
+      {body}
+    </s-box>
+  );
+}
+
+function Step({
+  n,
+  title,
+  done,
+  href,
+  cta,
+  external,
+}: {
+  n: string;
+  title: string;
+  done?: boolean;
+  href: string;
+  cta: string;
+  external?: boolean;
+}) {
   return (
     <s-box padding="base" borderWidth="base" borderRadius="base">
-      <s-stack direction="block" gap="small-200">
-        <s-text color="subdued">{label}</s-text>
-        <s-heading>{value}</s-heading>
+      <s-grid gridTemplateColumns="auto 1fr auto" gap="base" alignItems="center">
+        <s-badge tone={done ? "success" : undefined}>{done ? "Done" : n}</s-badge>
+        <s-text type="strong">{title}</s-text>
+        <s-button href={href} variant="tertiary" {...(external ? { target: "_top" } : {})}>
+          {cta}
+        </s-button>
+      </s-grid>
+    </s-box>
+  );
+}
+
+function Card({
+  title,
+  badge,
+  tone,
+  blurb,
+  linkLabel,
+  href,
+  external,
+}: {
+  title: string;
+  badge: string;
+  tone: "success" | "info";
+  blurb: string;
+  linkLabel: string;
+  href: string;
+  external?: boolean;
+}) {
+  return (
+    <s-box padding="base" borderWidth="base" borderRadius="base">
+      <s-stack direction="block" gap="small-300">
+        <s-stack direction="inline" gap="small-500" alignItems="center">
+          <s-text type="strong">{title}</s-text>
+          <s-badge tone={tone}>{badge}</s-badge>
+        </s-stack>
+        <s-text color="subdued">{blurb}</s-text>
+        <s-link href={href} {...(external ? { target: "_blank" } : {})}>
+          {linkLabel}
+        </s-link>
       </s-stack>
     </s-box>
   );

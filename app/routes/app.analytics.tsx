@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { getAnalytics, analyticsToCsv } from "../lib/analytics.server";
+import { Stat, Row, Bar, Empty, TILES, WIDE } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
@@ -31,6 +32,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function AnalyticsPage() {
   const d = useLoaderData<typeof loader>();
   const peak = Math.max(1, ...d.daily.map((x) => x.searches));
+  const topPeak = Math.max(1, ...d.top.map((t) => t.count));
+  const prodPeak = Math.max(1, ...d.topProducts.map((p) => p.clicks));
 
   return (
     <s-page heading="Search analytics">
@@ -39,29 +42,36 @@ export default function AnalyticsPage() {
       </s-button>
 
       <s-section heading={`Last ${d.windowDays} days`}>
-        <s-stack direction="inline" gap="large">
-          <Metric label="Searches" value={d.total.toLocaleString()} />
-          <Metric label="Click-through rate" value={`${d.ctr}%`} />
-          <Metric label="Add-to-cart rate" value={`${d.cartRate}%`} />
-          <Metric label="Zero-result rate" value={`${d.zeroRate}%`} />
-        </s-stack>
+        <s-grid gridTemplateColumns={TILES} gap="base">
+          <Stat label="Searches" value={d.total.toLocaleString()} />
+          <Stat label="Click-through" value={`${d.ctr}%`} />
+          <Stat label="Add to cart" value={`${d.cartRate}%`} />
+          <Stat
+            label="Zero results"
+            value={`${d.zeroRate}%`}
+            tone={d.zeroRate > 10 ? "critical" : undefined}
+            hint={d.zeroRate > 10 ? "High" : undefined}
+          />
+        </s-grid>
         {!d.isPro && (
-          <s-paragraph>
+          <s-box padding="base" background="subdued" borderRadius="base">
             <s-text color="subdued">
               Free shows {d.windowDays} days.{" "}
-              <s-link href="/app/plans">Pro</s-link> extends this to 90 days.
+              <s-link href="/app/plans">Pro</s-link> extends this to 90.
             </s-text>
-          </s-paragraph>
+          </s-box>
         )}
       </s-section>
 
       {d.daily.length > 1 && (
         <s-section heading="Searches per day">
-          {/* A bar per day. Inline SVG keeps this dependency-free and prints
-              correctly inside the embedded admin frame. */}
+          {/* One bar per day. Polaris ships no chart component, so this is a
+              small inline SVG: dependency-free, and it prints correctly inside
+              the embedded admin frame. currentColor makes it follow the theme
+              rather than pinning a brand hex that breaks in dark mode. */}
           <svg
             viewBox={`0 0 ${Math.max(d.daily.length * 12, 120)} 60`}
-            style={{ width: "100%", height: 90 }}
+            style={{ width: "100%", height: 96 }}
             role="img"
             aria-label={`Searches per day for the last ${d.windowDays} days`}
           >
@@ -75,7 +85,7 @@ export default function AnalyticsPage() {
                   width={8}
                   height={h}
                   rx={2}
-                  fill="#4f46e5"
+                  fill="currentColor"
                 >
                   <title>{`${x.day}: ${x.searches} searches, ${x.clicks} clicks, ${x.carts} added to cart`}</title>
                 </rect>
@@ -87,117 +97,115 @@ export default function AnalyticsPage() {
 
       <s-section heading="Top searches">
         {d.top.length ? (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Query</s-table-header>
-              <s-table-header>Searches</s-table-header>
-              <s-table-header>Clicks</s-table-header>
-              <s-table-header>CTR</s-table-header>
-              <s-table-header>Avg results</s-table-header>
-            </s-table-header-row>
+          <s-stack direction="block" gap="small-500">
             {d.top.map((t) => (
-              <s-table-row key={t.term}>
-                <s-table-cell>{t.term}</s-table-cell>
-                <s-table-cell>{t.count}</s-table-cell>
-                <s-table-cell>{t.clicks}</s-table-cell>
-                <s-table-cell>{t.ctr}%</s-table-cell>
-                <s-table-cell>{t.avgResults}</s-table-cell>
-              </s-table-row>
+              <Bar key={t.term} label={t.term} value={t.count} max={topPeak} />
             ))}
-          </s-table>
+          </s-stack>
         ) : (
-          <s-paragraph><s-text color="subdued">No search data yet.</s-text></s-paragraph>
+          <Empty heading="No searches yet">
+            Numbers appear here once shoppers start using the search box.
+          </Empty>
         )}
       </s-section>
 
-      <s-section heading="Zero-result searches">
-        <s-paragraph>
-          <s-text color="subdued">
-            Shoppers looked for these and found nothing. A synonym or a redirect fixes
-            most of them.
-          </s-text>
-        </s-paragraph>
-        {d.zero.length ? (
-          <s-unordered-list>
-            {d.zero.map((z) => (
-              <s-list-item key={z.term}>
-                {z.term} — {z.count}{" "}
-                <s-link href={`/app/synonyms?prefill=${encodeURIComponent(z.term)}`}>Fix with synonym</s-link>
-                {" · "}
-                <s-link href={`/app/merchandising?redirect=${encodeURIComponent(z.term)}`}>Redirect</s-link>
-              </s-list-item>
-            ))}
-          </s-unordered-list>
-        ) : (
-          <s-paragraph><s-text color="subdued">None — every search returns results.</s-text></s-paragraph>
-        )}
-      </s-section>
+      <s-grid gridTemplateColumns={WIDE} gap="base">
+        <s-grid-item>
+          <s-section heading="Found nothing">
+            <s-text color="subdued">
+              Shoppers searched for these and got no results.
+            </s-text>
+            {d.zero.length ? (
+              <s-stack direction="block" gap="small-300">
+                {d.zero.slice(0, 10).map((z) => (
+                  <Row
+                    key={z.term}
+                    actions={
+                      <>
+                        <s-button
+                          variant="tertiary"
+                          href={`/app/synonyms?prefill=${encodeURIComponent(z.term)}`}
+                        >
+                          Synonym
+                        </s-button>
+                        <s-button
+                          variant="tertiary"
+                          href={`/app/merchandising?redirect=${encodeURIComponent(z.term)}`}
+                        >
+                          Redirect
+                        </s-button>
+                      </>
+                    }
+                  >
+                    <s-text type="strong">{z.term}</s-text>
+                    <s-text color="subdued">{z.count} searches</s-text>
+                  </Row>
+                ))}
+              </s-stack>
+            ) : (
+              <Empty heading="Every search returns results" />
+            )}
+          </s-section>
+        </s-grid-item>
 
-      <s-section heading="Searches nobody clicked">
-        <s-paragraph>
-          <s-text color="subdued">
-            These returned products, but no one clicked any of them — the results were
-            wrong rather than missing. Pinning the right product usually fixes it.
-          </s-text>
-        </s-paragraph>
-        {d.noClick.length ? (
-          <s-unordered-list>
-            {d.noClick.map((z) => (
-              <s-list-item key={z.term}>
-                {z.term} — {z.count} searches, {z.avgResults} results each{" "}
-                <s-link href={`/app/merchandising?query=${encodeURIComponent(z.term)}`}>
-                  Merchandise this query
-                </s-link>
-              </s-list-item>
-            ))}
-          </s-unordered-list>
-        ) : (
-          <s-paragraph><s-text color="subdued">Nothing here — shoppers are clicking.</s-text></s-paragraph>
-        )}
-      </s-section>
+        <s-grid-item>
+          <s-section heading="Nobody clicked">
+            <s-text color="subdued">
+              These returned products, but no one opened any. The results were
+              wrong rather than missing.
+            </s-text>
+            {d.noClick.length ? (
+              <s-stack direction="block" gap="small-300">
+                {d.noClick.slice(0, 10).map((z) => (
+                  <Row
+                    key={z.term}
+                    actions={
+                      <s-button
+                        variant="tertiary"
+                        href={`/app/merchandising?query=${encodeURIComponent(z.term)}`}
+                      >
+                        Merchandise
+                      </s-button>
+                    }
+                  >
+                    <s-text type="strong">{z.term}</s-text>
+                    <s-text color="subdued">
+                      {z.count} searches, {z.avgResults} results each
+                    </s-text>
+                  </Row>
+                ))}
+              </s-stack>
+            ) : (
+              <Empty heading="Shoppers are clicking" />
+            )}
+          </s-section>
+        </s-grid-item>
+      </s-grid>
 
-      <s-section heading="Most-clicked products from search">
+      <s-section heading="Most clicked from search">
         {d.topProducts.length ? (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header>Product</s-table-header>
-              <s-table-header>Clicks from search</s-table-header>
-            </s-table-header-row>
+          <s-stack direction="block" gap="small-500">
             {d.topProducts.map((p) => (
-              <s-table-row key={p.productId}>
-                <s-table-cell>{p.title}</s-table-cell>
-                <s-table-cell>{p.clicks}</s-table-cell>
-              </s-table-row>
+              <Bar key={p.productId} label={p.title} value={p.clicks} max={prodPeak} />
             ))}
-          </s-table>
+          </s-stack>
         ) : (
-          <s-paragraph><s-text color="subdued">No clicks recorded yet.</s-text></s-paragraph>
+          <Empty heading="No clicks recorded yet" />
         )}
       </s-section>
 
-      <s-section slot="aside" heading="What these numbers measure">
+      <s-section slot="aside" heading="What these measure">
         <s-paragraph>
           <s-text color="subdued">
-            Click-through is the share of searches where a shopper opened a result.
-            Add-to-cart is the share that ended with a product in the cart — the
-            furthest we can follow a shopper, since checkout runs on Shopify&rsquo;s
-            own domain rather than on your storefront. Both are attributed back to
-            the specific search that produced them.
+            Click-through is the share of searches where a shopper opened a
+            result. Add to cart is the share that ended with a product in the
+            cart, which is as far as we can follow a shopper: checkout runs on
+            Shopify&rsquo;s domain, not your storefront. Both are attributed back
+            to the specific search that produced them.
           </s-text>
         </s-paragraph>
       </s-section>
     </s-page>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <s-box padding="base" borderWidth="base" borderRadius="base" minInlineSize="160px">
-      <s-stack direction="block" gap="small">
-        <s-text color="subdued">{label}</s-text>
-        <s-heading>{value}</s-heading>
-      </s-stack>
-    </s-box>
   );
 }
 

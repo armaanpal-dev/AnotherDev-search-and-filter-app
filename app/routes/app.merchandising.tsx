@@ -7,6 +7,7 @@ import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
+import { Row, Empty } from "../components/ui";
 
 const ids = (v: FormDataEntryValue | null) =>
   String(v || "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -161,21 +162,10 @@ export default function MerchandisingPage() {
         {rules.length ? (
           <s-stack direction="block" gap="small">
             {rules.map((r) => (
-              <s-box key={r.id} padding="base" borderWidth="base" borderRadius="base">
-                <s-stack direction="block" gap="small">
-                  <s-stack direction="inline" gap="base" alignItems="center">
-                    <s-badge tone={r.active ? "success" : undefined}>
-                      {r.active ? "Active" : "Paused"}
-                    </s-badge>
-                    <s-text type="strong">{r.name}</s-text>
-                    <s-text color="subdued">
-                      {r.triggerQuery ? `query “${r.triggerQuery}”` : ""}
-                      {r.triggerQuery && r.triggerCollection ? " · " : ""}
-                      {r.triggerCollection ? `collection ${r.triggerCollection}` : ""}
-                      {!r.triggerQuery && !r.triggerCollection ? "always on" : ""}
-                      {` · priority ${r.priority}`}
-                    </s-text>
-                    <span style={{ marginInlineStart: "auto", display: "flex", gap: "0.5rem" }}>
+              <Row
+                key={r.id}
+                  actions={
+                    <>
                       <fetcher.Form method="post">
                         <input type="hidden" name="intent" value="toggleRule" />
                         <input type="hidden" name="id" value={r.id} />
@@ -189,15 +179,31 @@ export default function MerchandisingPage() {
                         <input type="hidden" name="id" value={r.id} />
                         <s-button type="submit" variant="tertiary" tone="critical">Delete</s-button>
                       </fetcher.Form>
-                    </span>
+                    </>
+                  }
+                >
+                  <s-stack direction="inline" gap="small-500" alignItems="center">
+                    <s-badge tone={r.active ? "success" : undefined}>
+                      {r.active ? "Active" : "Paused"}
+                    </s-badge>
+                    <s-text type="strong">{r.name}</s-text>
                   </s-stack>
+                  <s-text color="subdued">
+                    {r.triggerQuery ? `query “${r.triggerQuery}”` : ""}
+                    {r.triggerQuery && r.triggerCollection ? " · " : ""}
+                    {r.triggerCollection ? `collection ${r.triggerCollection}` : ""}
+                    {!r.triggerQuery && !r.triggerCollection ? "always on" : ""}
+                    {` · priority ${r.priority}`}
+                  </s-text>
                   <RuleSummary rule={r} />
-                </s-stack>
-              </s-box>
+              </Row>
             ))}
           </s-stack>
         ) : (
-          <s-paragraph><s-text color="subdued">No rules yet.</s-text></s-paragraph>
+          <Empty heading="No rules yet">
+            Rules change what ranks first for a search. Start from a term in
+            Analytics that returned results nobody clicked.
+          </Empty>
         )}
       </s-section>
 
@@ -287,17 +293,19 @@ export default function MerchandisingPage() {
         {redirects.length ? (
           <s-stack direction="block" gap="small">
             {redirects.map((r) => (
-              <s-box key={r.id} padding="base" borderWidth="base" borderRadius="base">
-                <s-stack direction="inline" gap="base" alignItems="center">
-                  <s-text type="strong">{r.query}</s-text>
-                  <s-text color="subdued">goes to {r.url}</s-text>
-                  <fetcher.Form method="post" style={{ marginInlineStart: "auto" }}>
+              <Row
+                key={r.id}
+                actions={
+                  <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="deleteRedirect" />
                     <input type="hidden" name="id" value={r.id} />
                     <s-button type="submit" variant="tertiary" tone="critical">Delete</s-button>
                   </fetcher.Form>
-                </s-stack>
-              </s-box>
+                }
+              >
+                <s-text type="strong">{r.query}</s-text>
+                <s-text color="subdued">goes to {r.url}</s-text>
+              </Row>
             ))}
           </s-stack>
         ) : null}
