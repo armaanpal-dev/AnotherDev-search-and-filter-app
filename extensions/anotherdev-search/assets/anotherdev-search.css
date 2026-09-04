@@ -79,19 +79,25 @@
   .adsf-dropdown__preview { display: none; }
 }
 
-/* While our dropdown is open, hide the theme's OWN predictive-search results so
-   the two panels don't stack/overlap. Targets the common theme containers; our
-   own panel (.adsf-*) is never matched. Scoped to body.adsf-active so the theme
-   search behaves normally when ours isn't showing. */
-body.adsf-active predictive-search,
-body.adsf-active .predictive-search,
-body.adsf-active [data-predictive-search],
+/* While our dropdown is open, hide the theme's OWN predictive-search RESULTS so
+   the two panels do not stack.
+
+   Only results containers may appear here. An earlier version also matched the
+   wrappers -- predictive-search, .predictive-search, [data-predictive-search] --
+   but in Dawn and most OS 2.0 themes <predictive-search> is a custom element
+   wrapping the whole search FORM, input included. Hiding it removed the search
+   box the instant our panel opened, so the shopper could not type at all.
+   .search-results was dropped for the same reason: on a search template it is
+   the page's own product grid, not a dropdown. */
+body.adsf-active predictive-search .predictive-search__results,
+body.adsf-active predictive-search #predictive-search-results,
+body.adsf-active .predictive-search__results,
+body.adsf-active .predictive-search__result-group,
+body.adsf-active [data-predictive-search-results],
 body.adsf-active .search-modal__results,
 body.adsf-active .search__results,
 body.adsf-active .header__search-results,
-body.adsf-active .search-results,
-body.adsf-active .search-drawer__results,
-body.adsf-active .predictive-search__results { display: none !important; }
+body.adsf-active .search-drawer__results { display: none !important; }
 
 /* Spotlight panel style: dim the page behind so the panel never looks like it
    overlaps content. */
