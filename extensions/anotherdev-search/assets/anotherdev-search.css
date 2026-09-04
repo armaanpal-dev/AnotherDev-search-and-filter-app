@@ -140,34 +140,60 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 /* ---- Results app ---- */
 .adsf-app { --adsf-cols: 4; width: 100%; }
 .adsf-app__topbar { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0 1rem; flex-wrap: wrap; }
-.adsf-app__meta { flex: 1; min-width: 140px; color: #555; font-size: 0.92rem; }
+.adsf-app__meta { flex: 1; min-width: 140px; color: inherit; opacity: 0.75; font: inherit; }
 .adsf-app__meta a { color: var(--adsf-accent, #111); }
-.adsf-app__sort select { padding: 0.45rem 0.6rem; border: 1px solid #dcdcdc; border-radius: 8px; background: #fff; }
-.adsf-app__filter-toggle { display: none; padding: 0.45rem 0.9rem; border: 1px solid #dcdcdc; border-radius: 8px; background: #fff; cursor: pointer; font-weight: 600; }
+.adsf-app__sort select { padding: 0.45rem 0.6rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; font: inherit; }
+.adsf-app__filter-toggle { display: none; padding: 0.45rem 0.9rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; cursor: pointer; font: inherit; }
 
 .adsf-app__body { display: grid; grid-template-columns: 240px 1fr; gap: 1.75rem; align-items: start; }
 
 .adsf-facets__inner { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1.4rem; }
-.adsf-facet__title { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.adsf-facet__title { margin: 0 0 0.5rem; font: inherit; }
 .adsf-facet__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; max-height: 260px; overflow-y: auto; }
-.adsf-facet__item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+.adsf-facet__item { display: flex; align-items: center; gap: 0.5rem; font: inherit; }
 .adsf-facet__item label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
-.adsf-facet__count { color: #999; font-size: 0.8rem; }
+.adsf-facet__count { color: inherit; opacity: 0.6; font-size: 0.85em; }
 .adsf-facet__item--swatch label { gap: 0.5rem; }
 .adsf-swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); display: inline-block; }
 .adsf-facet__range { display: flex; align-items: center; gap: 0.4rem; }
-.adsf-facet__num { width: 72px; padding: 0.35rem 0.4rem; border: 1px solid #dcdcdc; border-radius: 6px; }
+.adsf-facet__num { width: 72px; padding: 0.35rem 0.4rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; font: inherit; }
 .adsf-facet__apply { padding: 0.35rem 0.6rem; border: 0; border-radius: 6px; background: var(--adsf-accent, #111); color: #fff; cursor: pointer; }
 
 .adsf-grid { display: grid; grid-template-columns: repeat(var(--adsf-cols, 4), 1fr); gap: 1.25rem; min-height: 300px; }
 .adsf-grid[aria-busy="true"] { opacity: 0.5; }
+/* ---- Product cards ---------------------------------------------------
+   These inherit the storefront rather than styling themselves. Font family,
+   size, weight and colour all come from the theme, so the grid matches the
+   rest of the shop. The few things that must be set are variables a merchant
+   or a theme can override:
+     --adsf-card-radius   corner radius on images (default: square)
+     --adsf-card-ratio    image aspect ratio (default: 1/1)
+     --adsf-card-placeholder  background behind a missing image */
 .adsf-card { position: relative; }
 .adsf-card a { text-decoration: none; color: inherit; display: block; }
-.adsf-card__img, .adsf-card__noimg { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 10px; background: #f2f2f2; display: block; }
-.adsf-card__title { margin: 0.5rem 0 0.25rem; font-size: 0.92rem; font-weight: 500; line-height: 1.3; }
-.adsf-card__price { font-weight: 600; font-size: 0.92rem; }
-.adsf-card__soldout { position: absolute; top: 8px; left: 8px; background: #fff; border: 1px solid #ddd; border-radius: 5px; padding: 2px 6px; font-size: 0.72rem; }
-.adsf-card--pinned::after { content: "Featured"; position: absolute; top: 8px; right: 8px; background: var(--adsf-accent, #111); color: #fff; border-radius: 5px; padding: 2px 6px; font-size: 0.7rem; }
+.adsf-card__img, .adsf-card__noimg {
+  width: 100%; display: block; object-fit: cover;
+  aspect-ratio: var(--adsf-card-ratio, 1 / 1);
+  border-radius: var(--adsf-card-radius, 0);
+  background: var(--adsf-card-placeholder, rgba(0, 0, 0, 0.04));
+}
+.adsf-card__title {
+  margin: 0.5rem 0 0.25rem;
+  font: inherit; color: inherit; line-height: inherit;
+}
+.adsf-card__price { font: inherit; color: inherit; }
+.adsf-card__soldout {
+  position: absolute; top: 8px; left: 8px;
+  background: var(--adsf-card-placeholder, rgba(255, 255, 255, 0.92));
+  color: inherit; border-radius: var(--adsf-card-radius, 0);
+  padding: 2px 6px; font: inherit; font-size: 0.75em;
+}
+.adsf-card--pinned::after {
+  content: "Featured"; position: absolute; top: 8px; right: 8px;
+  background: var(--adsf-accent, #111); color: #fff;
+  border-radius: var(--adsf-card-radius, 0);
+  padding: 2px 6px; font: inherit; font-size: 0.7em;
+}
 
 .adsf-pagination { display: flex; gap: 0.4rem; justify-content: center; margin: 2rem 0; flex-wrap: wrap; }
 .adsf-pagination button { padding: 0.4rem 0.7rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; }
@@ -286,13 +312,13 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 /* ---- Quick add to cart ---- */
 .adsf-card__add {
   width: 100%; margin-top: 0.5rem; padding: 0.5rem 0.75rem;
-  border: 1px solid var(--adsf-accent, #111); border-radius: 8px;
-  background: #fff; color: var(--adsf-accent, #111);
-  font: inherit; font-size: 0.85rem; cursor: pointer;
+  border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0);
+  background: transparent; color: inherit;
+  font: inherit; font-size: 0.9em; cursor: pointer;
 }
 .adsf-card__add:hover:not(:disabled) { background: var(--adsf-accent, #111); color: #fff; }
 .adsf-card__add:disabled { opacity: 0.65; cursor: default; }
-.adsf-card__vendor { font-size: 0.78rem; opacity: 0.7; margin-bottom: 0.15rem; }
+.adsf-card__vendor { font: inherit; font-size: 0.85em; opacity: 0.7; margin-bottom: 0.15rem; }
 .adsf-dropdown__pvendor { font-size: 0.75rem; opacity: 0.65; }
 
 /* ---- Pagination is now links, not buttons ---- */

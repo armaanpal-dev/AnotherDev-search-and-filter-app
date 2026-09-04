@@ -154,7 +154,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   .adsf-results__pagination [aria-current="page"]{background:#111;color:#fff;border-color:#111}
 </style>`;
 
-  return liquid(body);
+  // Never cache a search result page.
+  //
+  // The URL differs per query, but a back/forward navigation or an aggressive
+  // intermediary can still serve a previous render, which shows a shopper the
+  // heading and results of a search they did not make. It also keeps a stale
+  // grid on screen after the catalog changes.
+  return liquid(body, {
+    headers: { "Cache-Control": "no-store, max-age=0" },
+  });
 }
 
 /**

@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 /** Responsive column templates. Tiles wrap on their own, without media queries. */
 export const TILES = "repeat(auto-fit, minmax(170px, 1fr))";
 export const CARDS = "repeat(auto-fit, minmax(260px, 1fr))";
-export const WIDE = "repeat(auto-fit, minmax(320px, 1fr))";
+export const WIDE = "repeat(auto-fit, minmax(240px, 1fr))";
 
 export type Tone = "success" | "info" | "warning" | "critical";
 
@@ -32,7 +32,9 @@ export function Stat({
     <s-stack direction="block" gap="small-500">
       <s-text color="subdued">{label}</s-text>
       <s-heading>{value}</s-heading>
-      {tone ? <s-badge tone={tone}>{hint ?? ""}</s-badge> : hint ? <s-text color="subdued">{hint}</s-text> : null}
+      {hint ? (
+        tone ? <s-badge tone={tone}>{hint}</s-badge> : <s-text color="subdued">{hint}</s-text>
+      ) : null}
     </s-stack>
   );
   return href ? (
@@ -82,18 +84,16 @@ export function Card({
 export function Row({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
   return (
     <s-box padding="base" borderWidth="base" borderRadius="base">
-      <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-        <s-stack direction="block" gap="small-500">
-          {children}
-        </s-stack>
-        {actions ? (
+      {actions ? (
+        <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+          <s-stack direction="block" gap="small-500">{children}</s-stack>
           <s-stack direction="inline" gap="small-500" alignItems="center">
             {actions}
           </s-stack>
-        ) : (
-          <s-text> </s-text>
-        )}
-      </s-grid>
+        </s-grid>
+      ) : (
+        <s-stack direction="block" gap="small-500">{children}</s-stack>
+      )}
     </s-box>
   );
 }
@@ -109,7 +109,7 @@ export function Empty({
   action?: ReactNode;
 }) {
   return (
-    <s-box padding="large-100" borderWidth="base" borderRadius="base">
+    <s-box padding="base" background="subdued" borderRadius="base">
       <s-stack direction="block" gap="base" alignItems="center">
         <s-heading>{heading}</s-heading>
         {children && <s-text color="subdued">{children}</s-text>}
@@ -129,6 +129,19 @@ export function Empty({
  */
 export function Bar({ label, value, max, suffix }: { label: string; value: number; max: number; suffix?: string }) {
   const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+  // Nothing to compare yet: one bar at 100% beside another at 100% reads as
+  // a chart while carrying no information.
+  if (max <= 1) {
+    return (
+      <s-grid gridTemplateColumns="1fr auto" gap="small-200" alignItems="center">
+        <s-text>{label}</s-text>
+        <s-text type="strong">
+          {value.toLocaleString()}
+          {suffix ?? ""}
+        </s-text>
+      </s-grid>
+    );
+  }
   return (
     <s-grid gridTemplateColumns="minmax(90px, 1fr) 3fr auto" gap="small-200" alignItems="center">
       <s-text color="subdued">{label}</s-text>

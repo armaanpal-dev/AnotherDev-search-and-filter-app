@@ -29,6 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { ...summary, plan };
 };
 
+// Below this many searches a percentage is noise. Two searches, one of which
+// found nothing, is not a 50% failure rate worth flagging in red.
+const MIN_SAMPLE = 20;
+
 export default function AnalyticsPage() {
   const d = useLoaderData<typeof loader>();
   const peak = Math.max(1, ...d.daily.map((x) => x.searches));
@@ -49,8 +53,9 @@ export default function AnalyticsPage() {
           <Stat
             label="Zero results"
             value={`${d.zeroRate}%`}
-            tone={d.zeroRate > 10 ? "critical" : undefined}
-            hint={d.zeroRate > 10 ? "High" : undefined}
+            {...(d.total >= MIN_SAMPLE && d.zeroRate > 10
+              ? { tone: "critical" as const, hint: "High" }
+              : {})}
           />
         </s-grid>
         {d.plan !== "pro" && (

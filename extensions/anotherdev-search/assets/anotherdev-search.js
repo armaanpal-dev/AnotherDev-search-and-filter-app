@@ -365,6 +365,21 @@
    * theme input did not, so the same widget behaved differently depending on
    * which box the shopper used.
    */
+  /**
+   * Go to the results page for a term.
+   *
+   * Shared by the Enter key and the form submit so the two can never disagree
+   * about where a search goes.
+   */
+  function goToResults(cfg, term) {
+    var q = String(term || "").trim();
+    if (!q) return false;
+    rememberSearch(q);
+    var base = (cfg && cfg.resultsUrl) || "/apps/anotherdev-search/results";
+    location.assign(base + "?q=" + encodeURIComponent(q));
+    return true;
+  }
+
   function bindCombobox(input, dropdown, ctx) {
     input.setAttribute("role", "combobox");
     input.setAttribute("aria-autocomplete", "list");
@@ -423,6 +438,11 @@
         if (ctx.activeIndex >= 0 && items[ctx.activeIndex]) {
           e.preventDefault();
           items[ctx.activeIndex].click();
+        } else if (ctx.cfg && ctx.cfg.searchTakeover !== false) {
+          // Navigate from here rather than relying on the form submitting:
+          // themes routinely intercept submit on their own search component,
+          // which left the shopper sitting on the page they were already on.
+          if (goToResults(ctx.cfg, input.value)) e.preventDefault();
         } else {
           rememberSearch(input.value.trim());
         }
@@ -462,6 +482,7 @@
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
     };
+    ctx.cfg = cfg;
     bindCombobox(input, dropdown, ctx);
 
     function render(data, term) {
@@ -1028,6 +1049,7 @@
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
     };
+    ctx.cfg = cfg;
     bindCombobox(input, dropdown, ctx);
 
     // Viewport coordinates only. Adding scrollX/scrollY to a fixed-position
@@ -1098,16 +1120,22 @@
      * and saw the basic results the app exists to replace.
      */
     var form = input.form || input.closest("form");
-    if (form && cfg.searchTakeover !== false) {
+    // Bind once per FORM, not once per input. A theme with a desktop and a
+    // mobile box in one form got a handler per input, each closing over its own
+    // value, so a stale box could win and search for something never typed.
+    if (form && !form.getAttribute("data-adsf-form")) {
+      form.setAttribute("data-adsf-form", "1");
       form.addEventListener("submit", function (e) {
-        var term = input.value.trim();
-        rememberSearch(term);
-        if (!term) return;
-        e.preventDefault();
-        location.href = cfg.resultsUrl + "?q=" + encodeURIComponent(term);
+        var boxes = form.querySelectorAll(ADSF_SEARCH_SELECTOR);
+        var chosen = null;
+        for (var i = 0; i < boxes.length; i++) {
+          if (boxes[i] === document.activeElement) { chosen = boxes[i]; break; }
+          if (!chosen && String(boxes[i].value || "").trim()) chosen = boxes[i];
+        }
+        var term = String((chosen || input).value || "").trim();
+        if (cfg.searchTakeover === false) { rememberSearch(term); return; }
+        if (goToResults(cfg, term)) e.preventDefault();
       });
-    } else if (form) {
-      form.addEventListener("submit", function () { rememberSearch(input.value.trim()); });
     }
 
     var reposition = rafThrottle(function () { if (!dropdown.hidden) place(); });
