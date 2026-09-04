@@ -209,6 +209,23 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 
 .adsf-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1100; }
 
+/* ---- Filter bar over the theme's own grid ---------------------------
+   Mounted inside the theme's container, directly above the product grid, so
+   it inherits page width and padding. Type and colour are inherited too; the
+   only opinion here is spacing and a rule to separate it from the products. */
+.adsf-themegrid { margin: 0 0 1.5rem; font: inherit; color: inherit; }
+.adsf-themegrid .adsf-app__topbar { padding: 0 0 0.5rem; }
+.adsf-themegrid .adsf-facets__inner {
+  display: flex; flex-wrap: wrap; gap: 1rem 2rem;
+  padding: 0.75rem 0 1rem;
+  border-top: 1px solid currentColor; border-bottom: 1px solid currentColor;
+}
+/* currentColor at full strength is too heavy for a rule. */
+.adsf-themegrid .adsf-facets__inner { border-color: color-mix(in srgb, currentColor 15%, transparent); }
+.adsf-themegrid .adsf-facet { min-width: 150px; }
+.adsf-themegrid .adsf-facet__list { max-height: 200px; }
+.adsf-themegrid[aria-busy="true"] { opacity: 0.6; }
+
 /* ---- Filter layouts -------------------------------------------------
    Chosen by the merchant in the app settings and applied as one class on
    the results root. The default (sidebar) is the base CSS above, so only

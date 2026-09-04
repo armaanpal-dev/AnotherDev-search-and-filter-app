@@ -1253,7 +1253,10 @@
       '<div class="adsf-app__chips" data-adsf-chips></div>' +
       '<aside class="adsf-facets" data-adsf-facets aria-label="Filters">' +
       '<div class="adsf-facets__inner" data-adsf-facets-inner></div></aside>';
-    section.el.parentNode.insertBefore(panel, section.el);
+    // Directly above the grid, which sits inside the theme's page container.
+    // Inserting before the whole section put the bar outside that container,
+    // so it ran full-bleed while the grid stayed centred.
+    grid.parentNode.insertBefore(panel, grid);
     document.body.classList.add("adsf-collection-active");
 
     var facetsInner = panel.querySelector("[data-adsf-facets-inner]");
@@ -1285,21 +1288,29 @@
       mine.forEach(function (v, k) { merged.append(k, v); });
       history.replaceState(null, "", location.pathname + (merged.toString() ? "?" + merged : ""));
 
-      section.el.setAttribute("aria-busy", "true");
+      grid.setAttribute("aria-busy", "true");
       fetch(location.pathname + "?section_id=" + encodeURIComponent(section.id) + (shop.toString() ? "&" + shop : ""))
         .then(function (r) { return r.text(); })
         .then(function (html) {
-          // The response is the section markup, wrapper included.
           var tmp = document.createElement("div");
           tmp.innerHTML = html;
-          var fresh = tmp.firstElementChild;
-          if (fresh) {
-            section.el.innerHTML = fresh.innerHTML;
-            grid = section.el.querySelector(GRID_SELECTORS.join(",")) || grid;
+          // Pull just the grid out of the returned section and swap it in
+          // place. Replacing the whole section would take our own filter bar
+          // with it, since the bar now lives inside that section.
+          var fresh = tmp.querySelector(GRID_SELECTORS.join(","));
+          if (fresh && grid.parentNode) {
+            grid.parentNode.replaceChild(fresh, grid);
+            grid = fresh;
           }
-          section.el.setAttribute("aria-busy", "false");
+          grid.setAttribute("aria-busy", "false");
+          if (meta) {
+            // The theme knows the real filtered count; ours only knows the
+            // unfiltered one, so read it back rather than assert a number.
+            var n = fresh ? fresh.querySelectorAll("li, .grid__item, .card-wrapper").length : 0;
+            if (n) meta.textContent = n + " product" + (n === 1 ? "" : "s");
+          }
         })
-        .catch(function () { section.el.setAttribute("aria-busy", "false"); });
+        .catch(function () { grid.setAttribute("aria-busy", "false"); });
     }
 
     function loadFacets() {
