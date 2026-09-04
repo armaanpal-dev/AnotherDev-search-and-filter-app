@@ -133,7 +133,7 @@ export default function FiltersPage() {
         <s-paragraph>
           <s-text color="subdued">
             Colour swatches read their colours from{" "}
-            <s-link href="/app/settings">Settings → Colour swatches</s-link>. Anything
+            <s-link href="/app/settings">Settings, under Colour swatches</s-link>. Anything
             not mapped there falls back to a built-in list of common colour names.
           </s-text>
         </s-paragraph>

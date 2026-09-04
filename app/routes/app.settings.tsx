@@ -133,19 +133,19 @@ export default function SettingsPage() {
             <Check name="recentSearches" checked={s.recentSearches} label="Remember each shopper's recent searches" />
             <Check name="typoTolerance" checked={s.typoTolerance} label="Typo tolerance (fuzzy matching)" />
             <Check name="showOutOfStock" checked={s.showOutOfStock} label="Include out-of-stock products in results" />
-            <s-stack direction="inline" gap="base">
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
               <s-number-field name="minChars" label="Min characters to trigger" min={1} max={4} defaultValue={String(s.minChars)} />
               <s-number-field name="maxSuggestions" label="Max product suggestions" min={3} max={12} defaultValue={String(s.maxSuggestions)} />
-            </s-stack>
+            </s-grid>
           </s-stack>
         </s-section>
 
         <s-section heading="Results page">
           <s-stack direction="block" gap="base">
-            <s-stack direction="inline" gap="base">
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
               <s-number-field name="resultsPerPage" label="Products per page" min={12} max={48} defaultValue={String(s.resultsPerPage)} />
               <s-number-field name="gridColumns" label="Grid columns (desktop)" min={2} max={5} defaultValue={String(s.gridColumns)} />
-            </s-stack>
+            </s-grid>
             <Check name="showVendor" checked={s.showVendor} label="Show the brand name on result cards" />
             <Check name="quickAdd" checked={s.quickAdd} label="Add to cart directly from results (single-variant products)" />
           </s-stack>
@@ -198,7 +198,7 @@ export default function SettingsPage() {
             <ColorField name="backgroundColor" label="Panel background" value={s.backgroundColor} />
             <ColorField name="textColor" label="Text color" value={s.textColor} />
             <ColorField name="highlightColor" label="Highlight color (matched text)" value={s.highlightColor} />
-            <s-stack direction="inline" gap="base">
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
               <s-number-field name="fontSize" label="Font size (px)" min={12} max={22} defaultValue={String(s.fontSize)} />
               <s-select name="fontWeight" label="Font weight" value={s.fontWeight}>
                 <s-option value="300">Light</s-option>
@@ -206,7 +206,7 @@ export default function SettingsPage() {
                 <s-option value="500">Medium</s-option>
                 <s-option value="600">Semibold</s-option>
               </s-select>
-            </s-stack>
+            </s-grid>
           </s-stack>
         </s-section>
 
@@ -233,9 +233,10 @@ export default function SettingsPage() {
         <s-paragraph>
           <s-text color="subdued">
             These settings control the storefront search everywhere. Just make sure the
-            app is enabled once: <s-text type="strong">Online Store → Themes → Customize →
-            App embeds → AnotherDev Search</s-text>. All appearance and behaviour is set
-            here — nothing else to configure in the theme.
+            app is enabled once, from Online Store, then Themes, then Customize,
+            then App embeds, then <s-text type="strong">AnotherDev Search</s-text>.
+            All appearance and behaviour is set here; nothing else to configure in
+            the theme.
           </s-text>
         </s-paragraph>
       </s-section>
@@ -278,16 +279,11 @@ function Check({
   );
 }
 
+// s-color-field pairs a swatch picker with a validated hex input, replacing a
+// raw <input type="color"> that had to be wired to a text field by hand and
+// carried inline styles Polaris cannot theme.
 function ColorField({ name, label, value }: { name: string; label: string; value: string }) {
-  return (
-    <s-stack direction="inline" gap="base" alignItems="end">
-      <s-text-field name={name} label={label} defaultValue={value} />
-      <input type="color" defaultValue={value} onChange={(e) => {
-        const tf = document.querySelector(`[name="${name}"]`) as HTMLInputElement | null;
-        if (tf) tf.value = (e.target as HTMLInputElement).value;
-      }} style={{ width: 44, height: 36, border: "none", background: "none", cursor: "pointer" }} />
-    </s-stack>
-  );
+  return <s-color-field name={name} label={label} defaultValue={value} />;
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

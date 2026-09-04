@@ -254,7 +254,7 @@
         '<div class="adsf-preview__title">' + esc(p.title) + "</div>" +
         '<div class="adsf-preview__price">' + esc(priceRange(p, cfg)) + "</div>" +
         (p.description ? '<div class="adsf-preview__desc">' + esc(p.description) + "</div>" : "") +
-        '<a class="adsf-preview__link" href="/products/' + esc(p.handle) + '">See details →</a>';
+        '<a class="adsf-preview__link" href="/products/' + esc(p.handle) + '">See details</a>';
     }
 
     function section(label) {
@@ -677,7 +677,7 @@
           })
             .then(function (r) { if (!r.ok) throw new Error("add failed"); return r.json(); })
             .then(function () {
-              btn.textContent = "Added ✓";
+              btn.textContent = "Added";
               track(cfg.proxy, "add_to_cart", state.term, btn.getAttribute("data-adsf-add-product"));
               // Most themes listen for one of these to re-render the cart bubble.
               document.dispatchEvent(new CustomEvent("cart:refresh", { bubbles: true }));
@@ -709,6 +709,15 @@
       chips.innerHTML = "";
       if (!hasActiveFilters()) return;
 
+      // Reads as words rather than symbols: an open-ended range rendered as
+      // "10-∞", which means nothing to a shopper.
+      function priceChipLabel(min, max) {
+        if (min && max) return "Price " + min + " to " + max;
+        if (min) return "Price " + min + " and up";
+        if (max) return "Price up to " + max;
+        return "Price";
+      }
+
       function chip(label, onRemove) {
         var b = el("button", "adsf-chip");
         b.type = "button";
@@ -729,7 +738,7 @@
       });
 
       if (state.priceMin || state.priceMax) {
-        chip("Price " + (state.priceMin || "0") + "–" + (state.priceMax || "∞"), function () {
+        chip(priceChipLabel(state.priceMin, state.priceMax), function () {
           state.priceMin = state.priceMax = null;
           state.page = 1;
           apply(true);

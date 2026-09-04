@@ -59,7 +59,7 @@ export default function SynonymsPage() {
           <s-stack direction="block" gap="base">
             <s-select name="type" label="Type" value="multiway">
               <s-option value="multiway">Multi-way (interchangeable)</s-option>
-              <s-option value="oneway">One-way (input → terms)</s-option>
+              <s-option value="oneway">One-way (input maps to terms)</s-option>
             </s-select>
             <s-text-field name="input" label="Input term (one-way only)" defaultValue={prefill} />
             <s-text-field
@@ -82,7 +82,7 @@ export default function SynonymsPage() {
                 <s-stack direction="inline" gap="base" alignItems="center">
                   <s-badge>{s.type}</s-badge>
                   <s-text>
-                    {s.type === "oneway" ? `${s.input} → ` : ""}
+                    {s.type === "oneway" ? `${s.input} maps to ` : ""}
                     {s.terms.join(", ")}
                   </s-text>
                   <fetcher.Form method="post" style={{ marginInlineStart: "auto" }}>

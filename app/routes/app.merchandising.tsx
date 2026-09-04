@@ -206,7 +206,7 @@ export default function MerchandisingPage() {
           <input type="hidden" name="intent" value="createRule" />
           <s-stack direction="block" gap="base">
             <s-text-field name="name" label="Rule name" placeholder="Push new arrivals for “jacket”" />
-            <s-stack direction="inline" gap="base">
+            <s-grid gridTemplateColumns="1.4fr 1.4fr 0.7fr" gap="base" alignItems="end">
               <s-text-field
                 name="triggerQuery"
                 label="When the search is (blank = any)"
@@ -214,7 +214,7 @@ export default function MerchandisingPage() {
               />
               <s-text-field name="triggerCollection" label="…or the collection is (handle)" />
               <s-number-field name="priority" label="Priority" defaultValue="0" />
-            </s-stack>
+            </s-grid>
 
             <s-text type="strong">Specific products</s-text>
             <ProductPicker name="pinned" label="Pin to top (in order)" />
@@ -230,7 +230,12 @@ export default function MerchandisingPage() {
               </s-text>
             </s-paragraph>
             {conditionRows.map((row) => (
-              <s-stack key={row} direction="inline" gap="small" alignItems="end">
+              <s-grid
+                key={row}
+                gridTemplateColumns="1fr 1fr 1.5fr 1fr 0.8fr"
+                gap="small"
+                alignItems="end"
+              >
                 <s-select name="cond.field" label="Field" value="tag">
                   {fieldOptions.map((f) => (
                     <s-option key={f.value} value={f.value}>{f.label}</s-option>
@@ -249,7 +254,7 @@ export default function MerchandisingPage() {
                   <s-option value="hide">hide</s-option>
                 </s-select>
                 <s-number-field name="cond.weight" label="Strength" min={1} max={20} defaultValue="5" />
-              </s-stack>
+              </s-grid>
             ))}
             <s-button
               type="button"
@@ -273,11 +278,11 @@ export default function MerchandisingPage() {
         </s-paragraph>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="createRedirect" />
-          <s-stack direction="inline" gap="base" alignItems="end">
+          <s-grid gridTemplateColumns="1fr 1fr auto" gap="base" alignItems="end">
             <s-text-field name="query" label="When someone searches" defaultValue={sp.get("redirect") ?? ""} />
             <s-text-field name="url" label="Send them to (a path on your store)" placeholder="/collections/sale" />
             <s-button variant="primary" type="submit">Add redirect</s-button>
-          </s-stack>
+          </s-grid>
         </fetcher.Form>
         {redirects.length ? (
           <s-stack direction="block" gap="small">
@@ -285,7 +290,7 @@ export default function MerchandisingPage() {
               <s-box key={r.id} padding="base" borderWidth="base" borderRadius="base">
                 <s-stack direction="inline" gap="base" alignItems="center">
                   <s-text type="strong">{r.query}</s-text>
-                  <s-text color="subdued">→ {r.url}</s-text>
+                  <s-text color="subdued">goes to {r.url}</s-text>
                   <fetcher.Form method="post" style={{ marginInlineStart: "auto" }}>
                     <input type="hidden" name="intent" value="deleteRedirect" />
                     <input type="hidden" name="id" value={r.id} />
