@@ -1187,22 +1187,21 @@
   ];
 
   /**
-   * The narrowest node we can replace without destroying the rest of the page.
+   * The grid container, and nothing above it.
    *
-   * Emptying #MainContent took the collection banner, description, breadcrumbs
-   * and every other section on the template with it. The theme SECTION wrapping
-   * the product grid is the right unit: on OS 2.0 themes it holds the grid plus
-   * the theme's own facet/sort bar, and nothing else.
+   * Two earlier versions of this were too greedy. Emptying #MainContent took
+   * the whole template; climbing to the enclosing .shopify-section took the
+   * banner and description with it, because plenty of themes put those in the
+   * same section as the grid. The grid element itself is the only node we can
+   * replace and be certain we are not deleting the merchant’s content.
+   *
+   * The cost is that the theme's own facet UI survives; it is hidden by CSS
+   * (body.adsf-collection-active) rather than removed, which is reversible.
    */
   function findGridHost() {
     for (var i = 0; i < GRID_SELECTORS.length; i++) {
       var node = document.querySelector(GRID_SELECTORS[i]);
-      if (!node) continue;
-      // An explicit merchant mount point is already the exact target.
-      if (node.getAttribute("data-adsf-collection-mount") != null) return node;
-      return (
-        node.closest(".shopify-section, [id^='shopify-section'], section") || node
-      );
+      if (node) return node;
     }
     return null;
   }
@@ -1218,15 +1217,11 @@
     if (!SEARCH_PATH_RE.test(location.pathname)) return false;
     if (document.querySelector("[data-adsf-results-app]")) return false; // block already present
 
-    // On /search the whole page IS the results, so the main container is a
-    // defensible fallback when no grid is recognisable (a zero-result page may
-    // not render one). Collection pages get no such fallback.
-    var host =
-      findGridHost() ||
-      document.querySelector("#MainContent main") ||
-      document.querySelector("#MainContent") ||
-      document.querySelector("main") ||
-      document.querySelector('[role="main"]');
+    // Same rule as collection pages: replace the grid, never a container that
+    // might hold anything else. The old #MainContent fallback was how the
+    // whole template got wiped on themes we did not recognise, and no amount
+    // of takeover is worth deleting a merchant's page.
+    var host = findGridHost();
     if (!host) return false;
 
     var sp = new URLSearchParams(location.search);
@@ -1239,6 +1234,7 @@
     mount.innerHTML = RESULTS_MARKUP;
     host.innerHTML = "";
     host.appendChild(mount);
+    document.body.classList.add("adsf-collection-active");
 
     // The theme's URL uses ?q=, which our state reader already understands.
     if (!sp.get("q") && sp.get("query")) {
@@ -1287,6 +1283,9 @@
     mount.innerHTML = RESULTS_MARKUP;
     host.innerHTML = "";
     host.appendChild(mount);
+    // The theme's own facet form is still on the page and now points at a grid
+    // that no longer exists. Hide it rather than delete it.
+    document.body.classList.add("adsf-collection-active");
     initResultsApp(mount, cfg);
     return true;
   }

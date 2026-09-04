@@ -99,6 +99,20 @@ body.adsf-active .search__results,
 body.adsf-active .header__search-results,
 body.adsf-active .search-drawer__results { display: none !important; }
 
+/* When we replace a collection grid, the theme's own facet and sort controls
+   are left behind driving a grid that is gone. Hide them.
+
+   Facet CONTAINERS only, never an ancestor that could hold the grid: this is
+   the same mistake that made <predictive-search> disappear along with the
+   search box. Hiding is also reversible, unlike removing nodes. */
+body.adsf-collection-active facet-filters-form,
+body.adsf-collection-active #FacetFiltersForm,
+body.adsf-collection-active #FacetFiltersFormMobile,
+body.adsf-collection-active .facets-container,
+body.adsf-collection-active .mobile-facets,
+body.adsf-collection-active .collection-filters,
+body.adsf-collection-active .collection__filters { display: none !important; }
+
 /* Spotlight panel style: dim the page behind so the panel never looks like it
    overlaps content. */
 .adsf-backdrop {
