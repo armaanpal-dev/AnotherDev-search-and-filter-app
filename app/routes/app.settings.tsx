@@ -87,6 +87,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     gridColumns: numeric("gridColumns"),
     fontSize: numeric("fontSize"),
     filterLayout: field("filterLayout"),
+    productCards: field("productCards"),
     filterButtonShape: field("filterButtonShape"),
     filterButtonBg: field("filterButtonBg"),
     filterButtonText: field("filterButtonText"),
@@ -311,6 +312,35 @@ export default function SettingsPage() {
             </s-select>
             <Check name="showVendor" checked={s.showVendor} label="Show the brand name on result cards" />
             <Check name="quickAdd" checked={s.quickAdd} label="Add to cart directly from results (single-variant products)" />
+          </s-stack>
+        </s-section>
+
+        <s-section heading="Collection pages">
+          <s-stack direction="block" gap="base">
+            <s-select
+              name="productCards"
+              label="Who draws the product cards"
+              value={s.productCards}
+            >
+              <s-option value="auto">Automatic - theme cards when every filter works</s-option>
+              <s-option value="theme">Always my theme’s product cards</s-option>
+              <s-option value="app">Always this app’s product cards</s-option>
+            </s-select>
+            <s-text color="subdued">
+              Your theme’s cards are re-rendered by Shopify, which can only apply
+              the filters you enabled in Search &amp; Discovery. This app’s cards are
+              filtered by its own index, so every filter you configure works.
+              Automatic keeps your theme’s cards whenever that is possible and
+              switches to this app’s only when a filter would otherwise do nothing.
+            </s-text>
+            {s.productCards === "theme" && (
+              <s-banner tone="info">
+                <s-paragraph>
+                  Filters your theme cannot apply are hidden rather than shown
+                  broken. Enable them under Search &amp; Discovery to see them here.
+                </s-paragraph>
+              </s-banner>
+            )}
           </s-stack>
         </s-section>
 
@@ -582,6 +612,10 @@ function ColorField({ name, label, value }: { name: string; label: string; value
  * chance of it disagreeing with the real thing because it drifted its own logic.
  */
 function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
+  // "auto" can go either way per collection, so the preview shows our cards
+  // for it: that is the case worth previewing, since the theme’s cards are
+  // whatever the theme already looks like.
+  const themeCards = p.productCards === "theme";
   const rich = p.layout === "rich";
   const radius =
     p.filterButtonShape === "square" ? "0" : p.filterButtonShape === "rounded" ? "8px" : "999px";
@@ -779,16 +813,41 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
             }}
           >
             {Array.from({ length: p.gridColumns }).map((_, i) => (
-              <div key={i} style={{ fontSize: `${p.fontSize}px`, color: p.textColor }}>
+              <div
+                key={i}
+                style={{
+                  fontSize: `${p.fontSize}px`,
+                  color: p.textColor,
+                  // Under "theme" the cards are not ours to style, so the preview
+                  // stops pretending otherwise: dashed outline, none of our card
+                  // chrome. Showing our card here is what made the preview
+                  // disagree with the live storefront.
+                  ...(themeCards
+                    ? {
+                        border: "1px dashed rgba(0,0,0,.25)",
+                        borderRadius: 8,
+                        padding: 8,
+                        opacity: 0.75,
+                      }
+                    : null),
+                }}
+              >
                 <div
                   style={{ aspectRatio: "1/1", background: "rgba(0,0,0,.07)", borderRadius: 8 }}
                 />
-                <div style={{ marginTop: 6, fontWeight: Number(p.fontWeight) }}>Product name</div>
-                {p.showVendor && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontWeight: themeCards ? 400 : Number(p.fontWeight),
+                  }}
+                >
+                  {themeCards ? "Your theme’s card" : "Product name"}
+                </div>
+                {p.showVendor && !themeCards && (
                   <div style={{ opacity: 0.6, fontSize: "0.85em" }}>Brand</div>
                 )}
                 <div style={{ fontWeight: 600 }}>£00.00</div>
-                {p.quickAdd && (
+                {p.quickAdd && !themeCards && (
                   <div
                     style={{
                       marginTop: 6,
@@ -807,7 +866,9 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
             ))}
           </div>
           <s-text color="subdued">
-            {p.gridColumns} columns · filters as a {p.filterLayout} · {p.resultsPerPage} per page
+            {themeCards
+              ? `Your theme draws these cards · filters as a ${p.filterLayout}`
+              : `${p.gridColumns} columns · filters as a ${p.filterLayout} · ${p.resultsPerPage} per page`}
           </s-text>
         </div>
       </div>

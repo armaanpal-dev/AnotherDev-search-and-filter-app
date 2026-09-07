@@ -33,6 +33,23 @@ export interface WidgetSettings {
   maxSuggestions: number;
   // Where the widget takes over
   collectionFilters: boolean;   // inject filters + grid on collection pages
+  /**
+   * Who draws the product cards on a collection page.
+   *
+   * These are not interchangeable, and the trade-off is forced on us by
+   * Shopify: theme cards are re-rendered through the Section Rendering API,
+   * which can only be filtered by Shopify’s native filter params, and those
+   * are ignored unless the merchant enabled the matching filter under Search
+   * & Discovery. Our own grid is filtered by our index, so every facet works
+   * — but the cards are ours, not the theme’s.
+   *
+   *   auto   theme cards when every configured facet is natively supported,
+   *          our grid when one is not, so filters always work (default)
+   *   theme  always the theme’s cards; facets Shopify cannot apply are
+   *          dropped rather than shown broken
+   *   app    always our grid, so every facet works regardless of the theme
+   */
+  productCards: "auto" | "theme" | "app";
   // How the facet UI is presented on results and collection pages.
   //   sidebar  column beside the grid, drawer on mobile (default)
   //   topbar   one horizontal row above the grid
@@ -78,6 +95,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   minChars: 2,
   maxSuggestions: 8,
   collectionFilters: true,
+  productCards: "auto",
   filterLayout: "sidebar",
   filterButtonShape: "pill",
   filterButtonBg: "transparent",
@@ -117,6 +135,7 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     minChars: num(s.minChars, DEFAULT_SETTINGS.minChars, 1, 4),
     maxSuggestions: num(s.maxSuggestions, DEFAULT_SETTINGS.maxSuggestions, 3, 12),
     collectionFilters: bool(s.collectionFilters, DEFAULT_SETTINGS.collectionFilters),
+    productCards: oneOf(s.productCards, ["auto", "theme", "app"], DEFAULT_SETTINGS.productCards),
     filterButtonShape: oneOf(s.filterButtonShape, ["pill", "rounded", "square"], DEFAULT_SETTINGS.filterButtonShape),
     filterButtonBg: color(s.filterButtonBg, DEFAULT_SETTINGS.filterButtonBg),
     filterButtonText: color(s.filterButtonText, DEFAULT_SETTINGS.filterButtonText),

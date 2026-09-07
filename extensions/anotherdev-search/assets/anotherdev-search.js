@@ -2338,15 +2338,26 @@
         // show a filter that silently does nothing, we check first: if every
         // configured facet is supported natively, the theme draws the cards; if
         // even one is not, we draw the grid ourselves so that ALL of them work.
-        var supported = themeFilterParams();
-        var wanted = (d.facets || []).filter(function (fc) {
-          return paramForSource(fc.source);
-        });
-        var missing = supported
-          ? wanted.filter(function (fc) { return !supported[paramForSource(fc.source)]; })
-          : wanted; // theme exposes no filters at all
-        if (!missing.length && wanted.length) {
-          if (initThemeGridFacets(cfg, scope, host, d.facets)) return;
+        var mode = cfg.productCards || "auto";
+
+        if (mode !== "app") {
+          var supported = themeFilterParams();
+          var wanted = (d.facets || []).filter(function (fc) {
+            return paramForSource(fc.source);
+          });
+          var missing = supported
+            ? wanted.filter(function (fc) { return !supported[paramForSource(fc.source)]; })
+            : wanted; // theme exposes no filters at all
+          // "theme" is a promise the merchant made about their cards, so we keep
+          // it even when some facets cannot be applied: those are dropped by
+          // initThemeGridFacets rather than rendered as buttons that do nothing.
+          if (mode === "theme" || (!missing.length && wanted.length)) {
+            if (initThemeGridFacets(cfg, scope, host, d.facets)) return;
+          }
+          // Only "auto" is allowed to fall through to our own grid. Under
+          // "theme" the merchant asked us not to touch their cards, so an
+          // unrecognised theme means we leave the page exactly as it was.
+          if (mode === "theme") return;
         }
 
         var mount = el("div", "adsf-app");
@@ -2418,6 +2429,7 @@
     cfg.searchTakeover = s.searchTakeover !== false;
     cfg.collectionFilters = s.collectionFilters !== false;
     cfg.filterLayout = s.filterLayout || "sidebar";
+    cfg.productCards = s.productCards || "auto";
     cfg.showFacetCounts = s.showFacetCounts !== false;
     cfg.resultsPerPage = s.resultsPerPage || 24;
     cfg.gridColumns = s.gridColumns || 4;
@@ -2471,6 +2483,7 @@
       mode: "both",
       searchOn: true,
       filtersOn: true,
+      productCards: "auto",
       autoAttach: g.autoAttach !== false,
       searchTakeover: true,
       collectionFilters: true,
