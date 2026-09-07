@@ -15,6 +15,13 @@ export default function About() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
+        <img
+          className={styles.logo}
+          src="/icon.svg"
+          alt=""
+          width={72}
+          height={72}
+        />
         <h1 className={styles.heading}>AnotherDev Search &amp; Filters</h1>
         <p className={styles.text}>
           Fast, typo-tolerant search and faceted filters for your Shopify store —

@@ -1,4 +1,4 @@
-import { GROWTH_PLAN, PRO_PLAN } from "../shopify.server";
+import { GROWTH_PLAN, PRO_PLAN, CUSTOM_PLAN } from "../shopify.server";
 import {
   PLAN_LIMITS,
   PLAN_ORDER,
@@ -16,6 +16,7 @@ export type { PlanKey, PlanLimits };
 
 /** Highest tier first: used when resolving which subscription a shop holds. */
 const PAID_ORDER: { key: PlanKey; billingPlan: string }[] = [
+  { key: "custom", billingPlan: CUSTOM_PLAN },
   { key: "pro", billingPlan: PRO_PLAN },
   { key: "growth", billingPlan: GROWTH_PLAN },
 ];
@@ -24,6 +25,7 @@ const PAID_ORDER: { key: PlanKey; billingPlan: string }[] = [
 export const BILLING_PLAN_BY_KEY: Partial<Record<PlanKey, string>> = {
   growth: GROWTH_PLAN,
   pro: PRO_PLAN,
+  custom: CUSTOM_PLAN,
 };
 
 /**
@@ -100,4 +102,4 @@ export async function getPlanStatus(
   return { plan, isPaid: plan !== "free", overridden: false, limits: PLAN_LIMITS[plan] };
 }
 
-export { GROWTH_PLAN, PRO_PLAN };
+export { GROWTH_PLAN, PRO_PLAN, CUSTOM_PLAN };

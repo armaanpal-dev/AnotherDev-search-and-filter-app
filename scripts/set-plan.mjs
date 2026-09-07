@@ -16,7 +16,7 @@ try {
   // No .env file — rely on ambient environment variables.
 }
 
-const PLANS = ["free", "growth", "pro"];
+const PLANS = ["free", "growth", "pro", "custom"];
 
 const prisma = new PrismaClient({
   datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,

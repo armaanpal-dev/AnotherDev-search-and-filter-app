@@ -6,7 +6,7 @@
 // that needs those lives in ./billing.server.ts and imports this file.
 
 /**
- * The three tiers, and what each one actually unlocks.
+ * The four tiers, and what each one actually unlocks.
  *
  * This is the ONLY source of truth for entitlements. Every gate in the app reads
  * a capability from here rather than comparing plan names, so adding a tier does
@@ -46,13 +46,26 @@ export const PLAN_LIMITS = {
     aiFeed: true,
     semantic: true,
   },
+  custom: {
+    name: "Custom",
+    price: 70,
+    productLimit: Infinity,
+    // The only capability Custom adds over Pro that the code can enforce.
+    // Everything else it sells (priority support, guided setup) happens
+    // outside the app, so there is nothing here to gate on.
+    analyticsDays: 365,
+    merchandising: true,
+    redirects: true,
+    aiFeed: true,
+    semantic: true,
+  },
 } as const;
 
 export type PlanKey = keyof typeof PLAN_LIMITS;
 export type PlanLimits = (typeof PLAN_LIMITS)[PlanKey];
 
 /** Cheapest first. The order tiers are presented and compared in. */
-export const PLAN_ORDER: PlanKey[] = ["free", "growth", "pro"];
+export const PLAN_ORDER: PlanKey[] = ["free", "growth", "pro", "custom"];
 
 export function isPlanKey(v: unknown): v is PlanKey {
   return typeof v === "string" && Object.prototype.hasOwnProperty.call(PLAN_LIMITS, v);

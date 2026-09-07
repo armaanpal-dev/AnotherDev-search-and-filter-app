@@ -12,8 +12,13 @@ import prisma from "./db.server";
 // listed here. These strings are what appear on the merchant invoice and in
 // billing.check(), so renaming one orphans existing subscriptions.
 // Entitlements live in app/lib/billing.server.ts; this file only sets price.
+// These strings must match the Display name of the matching plan in the
+// Developer Dashboard exactly: managed pricing names a subscription after the
+// display name, and billing.check() matches on that name. A mismatch reads a
+// paying merchant as Free.
 export const GROWTH_PLAN = "Growth";
 export const PRO_PLAN = "Pro";
+export const CUSTOM_PLAN = "Custom";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -33,7 +38,7 @@ const shopify = shopifyApp({
           interval: BillingInterval.Every30Days,
         },
       ],
-      trialDays: 14,
+      trialDays: 7,
     },
     [PRO_PLAN]: {
       lineItems: [
@@ -43,7 +48,20 @@ const shopify = shopifyApp({
           interval: BillingInterval.Every30Days,
         },
       ],
-      trialDays: 14,
+      trialDays: 7,
+    },
+    // Annual ($777) is sold only through the App Store pricing page: the
+    // in-app upgrade button creates a monthly charge, because nothing in the
+    // UI asks the merchant to choose a billing cycle.
+    [CUSTOM_PLAN]: {
+      lineItems: [
+        {
+          amount: 70,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
+      trialDays: 7,
     },
   },
   future: {

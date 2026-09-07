@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="AnotherDev Search and Filters">
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="260" y1="260" x2="800" y2="800">
+      <stop offset="0" stop-color="#FF4B8F"/>
+      <stop offset="1" stop-color="#8C5CFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="#101336"/>
+  <circle cx="452" cy="452" r="172" fill="none" stroke="url(#g)" stroke-width="110"/>
+  <path d="M598 598 L772 772" fill="none" stroke="url(#g)" stroke-width="110" stroke-linecap="round"/>
+</svg>
