@@ -4,7 +4,13 @@ import { getSearchEngine } from "../lib/search/index.server";
 import { jsonCors, loadProxyShop } from "../lib/proxy.server";
 import type { RecommendationKind } from "../lib/search/types";
 
-const KINDS: RecommendationKind[] = ["related", "trending", "bestsellers", "recent"];
+const KINDS: RecommendationKind[] = [
+  "related",
+  "trending",
+  "bestsellers",
+  "recent",
+  "personalized",
+];
 
 /**
  * GET apps/anotherdev-search/recommend?kind=related&productId=123&limit=8
@@ -32,21 +38,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
     Math.max(1, parseInt(url.searchParams.get("limit") ?? "8", 10) || 8),
   );
 
+  // Recently-viewed ids for the personalised rail. They live in the shopper's
+  // own localStorage and are sent up per request — nothing is stored here, so
+  // this builds no profile and needs no customer account.
+  const seenProductIds = (url.searchParams.get("seen") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => /^\d{1,20}$/.test(s))
+    .slice(0, 20);
+
   const products = await getSearchEngine().recommend({
     shopId: shop.shopId,
     kind,
     productId: url.searchParams.get("productId")?.slice(0, 32) || undefined,
+    seenProductIds,
     collection: url.searchParams.get("collection")?.slice(0, 200) || undefined,
     limit,
     includeUnavailable: shop.settings.showOutOfStock,
   });
 
-  return jsonCors(
-    { kind, products },
-    200,
-    // Recommendations shift slowly (popularity, click counts) and are identical
-    // for every shopper, so this is the one storefront response worth caching
-    // publicly at the edge.
-    { "Cache-Control": "public, max-age=300, stale-while-revalidate=3600" },
-  );
+  // A personalised rail is different for every shopper, so it is the one kind
+  // that must NOT be cached publicly — a shared cache would hand one shopper's
+  // browsing history to the next visitor.
+  const cacheControl =
+    kind === "personalized"
+      ? "private, max-age=60"
+      : "public, max-age=300, stale-while-revalidate=3600";
+
+  return jsonCors({ kind, products }, 200, { "Cache-Control": cacheControl });
 }

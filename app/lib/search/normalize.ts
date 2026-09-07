@@ -55,6 +55,52 @@ export function stripLiquid(s: string): string {
 }
 
 /**
+ * The same defusing, for a value that will end up inside a JSON payload which is
+ * itself rendered through Liquid — the `<script type="application/ld+json">`
+ * block on the crawlable results page.
+ *
+ * Two things make this a separate function rather than a call to `stripLiquid`:
+ *
+ *  - The zero-width space above is invisible in rendered HTML but is a real
+ *    character in structured data, so it would end up inside the product names
+ *    Google reads. An ordinary space breaks the token just as well and is honest
+ *    about it.
+ *  - It must be applied to the VALUES before serialisation, never to the
+ *    serialised JSON, because JSON's own `{` and `}` are structural. That is why
+ *    `defuseLiquidDeep` exists.
+ */
+export function stripLiquidJson(s: string): string {
+  return String(s ?? "")
+    .replace(/\{\{/g, "{ {")
+    .replace(/\}\}/g, "} }")
+    .replace(/\{%/g, "{ %")
+    .replace(/%\}/g, "% }");
+}
+
+/**
+ * Recursively defuse every string in a JSON-able value, keys included.
+ *
+ * Without this, the JSON-LD block was the one place on the crawlable results
+ * page where a value reached Liquid unescaped — and the search term is
+ * shopper-controlled, so `?q={{ shop.email }}` was executed server-side in the
+ * merchant's context.
+ */
+export function defuseLiquidDeep<T>(value: T): T {
+  if (typeof value === "string") return stripLiquidJson(value) as unknown as T;
+  if (Array.isArray(value)) {
+    return value.map((v) => defuseLiquidDeep(v)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[stripLiquidJson(k)] = defuseLiquidDeep(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
+/**
  * Does this look like a SKU / product code rather than prose? Codes are short,
  * unspaced, and mix letters with digits or separators ("TSH-RED-M", "AB12345").
  * Drives the exact-SKU branch of the query, which outranks everything else.

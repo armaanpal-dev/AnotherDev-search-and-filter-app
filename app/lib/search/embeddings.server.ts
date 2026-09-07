@@ -36,8 +36,37 @@ function providerConfig(): ProviderConfig | null {
   return {
     provider: "voyage",
     apiKey,
-    model: process.env.EMBEDDINGS_MODEL ?? "voyage-3.5-lite",
+    // Multimodal puts text and images in ONE space, which is the whole trick
+    // behind search-by-photo: the product vectors and the uploaded picture
+    // become comparable without a second index. Same 1024 dimensions, so the
+    // existing column and HNSW index are unchanged.
+    model:
+      process.env.EMBEDDINGS_MODEL ??
+      (multimodalEnabled() ? "voyage-multimodal-3" : "voyage-3.5-lite"),
   };
+}
+
+/**
+ * Is search-by-image switched on for this deployment?
+ *
+ * Separate from SEMANTIC_SEARCH_ENABLED because it costs something real: the
+ * product vectors have to be built by a multimodal model, which is slower and
+ * dearer than the text one, and turning it on invalidates every embedding
+ * already stored. OpenAI has no multimodal embedding endpoint, so this is
+ * Voyage-only — and says so rather than silently doing nothing.
+ */
+export function multimodalEnabled(): boolean {
+  return (
+    process.env.SEMANTIC_SEARCH_ENABLED === "true" &&
+    process.env.EMBEDDINGS_MULTIMODAL === "true" &&
+    (process.env.EMBEDDINGS_PROVIDER ?? "voyage") === "voyage" &&
+    !!process.env.VOYAGE_API_KEY
+  );
+}
+
+/** Image search needs the multimodal model AND the pgvector column. */
+export async function imageSearchReady(): Promise<boolean> {
+  return multimodalEnabled() && (await hasVectorColumn());
 }
 
 /** Cheap synchronous check callers use before doing any semantic work. */
@@ -170,6 +199,99 @@ export function toVectorLiteral(vec: number[]): string {
   return `[${vec.join(",")}]`;
 }
 
+/**
+ * Embed a shopper's uploaded photo into the same space as the product vectors.
+ *
+ * "Find me that jacket" is a query no keyword index can answer, and it is
+ * exactly what a shopper does when they have seen something and cannot name it.
+ * Multimodal embeddings make it a nearest-neighbour lookup against the index the
+ * app already maintains — no separate service, no second index.
+ *
+ * Never throws: an unreachable provider, an unreadable image or a model that
+ * declines it must all degrade to "no results from the photo", not to a broken
+ * storefront.
+ */
+export async function embedImage(
+  dataUrl: string,
+): Promise<number[] | null> {
+  if (!multimodalEnabled()) return null;
+  const cfg = providerConfig();
+  if (!cfg || cfg.provider !== "voyage") return null;
+
+  try {
+    const res = await fetch("https://api.voyageai.com/v1/multimodalembeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        // The content array is how the multimodal endpoint takes mixed input;
+        // one image and nothing else is a pure visual query.
+        inputs: [{ content: [{ type: "image_base64", image_base64: dataUrl }] }],
+        input_type: "query",
+      }),
+    });
+    if (!res.ok) throw new Error(`Voyage multimodal ${res.status}`);
+    const json: { data?: { embedding?: number[] }[] } = await res.json();
+    const vec = json.data?.[0]?.embedding;
+    return Array.isArray(vec) && vec.length === EMBEDDING_DIMS ? vec : null;
+  } catch (e: unknown) {
+    console.error("[embeddings] image embed failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+/**
+ * Product vectors, built from the title AND the product photo when multimodal is
+ * on. Embedding both is what lets a text query and a photo query rank against
+ * the same rows.
+ */
+async function embedDocuments(
+  rows: { text: string; imageUrl: string | null }[],
+): Promise<number[][] | null> {
+  const cfg = providerConfig();
+  if (!cfg || !rows.length) return null;
+
+  if (!multimodalEnabled() || cfg.provider !== "voyage") {
+    return embed(rows.map((r) => r.text), "document");
+  }
+
+  try {
+    const res = await fetch("https://api.voyageai.com/v1/multimodalembeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        inputs: rows.map((r) => ({
+          content: [
+            { type: "text", text: r.text.slice(0, 4000) },
+            // Shopify's CDN URLs are public, so the provider can fetch them
+            // directly and we never proxy image bytes through this server.
+            ...(r.imageUrl ? [{ type: "image_url", image_url: r.imageUrl }] : []),
+          ],
+        })),
+        input_type: "document",
+      }),
+    });
+    if (!res.ok) throw new Error(`Voyage multimodal ${res.status}`);
+    const json: { data?: { embedding?: number[] }[] } = await res.json();
+    const vectors = (json.data ?? []).map((d) => d.embedding as number[]);
+    return vectors.length === rows.length ? vectors : null;
+  } catch (e: unknown) {
+    console.error(
+      "[embeddings] multimodal document batch failed:",
+      e instanceof Error ? e.message : e,
+    );
+    // Text-only is a worse index, not a broken one, so it is the right fallback.
+    return embed(rows.map((r) => r.text), "document");
+  }
+}
+
 /** What we actually embed for a product — the fields that carry meaning. */
 export function productEmbeddingText(p: {
   title: string;
@@ -216,12 +338,15 @@ export async function embedPendingProducts(
         productType: true,
         tags: true,
         description: true,
+        imageUrl: true,
       },
       take: batchSize,
     });
     if (!pending.length) break;
 
-    const vectors = await embed(pending.map(productEmbeddingText), "document");
+    const vectors = await embedDocuments(
+      pending.map((p) => ({ text: productEmbeddingText(p), imageUrl: p.imageUrl })),
+    );
     if (!vectors || vectors.length !== pending.length) break; // provider trouble
 
     // One statement per row: pgvector has no bulk-update helper, and these run

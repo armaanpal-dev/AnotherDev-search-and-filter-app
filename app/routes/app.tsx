@@ -37,6 +37,7 @@ export default function App() {
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
         <s-link href="/app/sync">Index</s-link>
+        <s-link href="/app/preview">Test search</s-link>
         <s-link href="/app/filters">Filters</s-link>
         <s-link href="/app/synonyms">Synonyms</s-link>
         <s-link href="/app/merchandising">Merchandising</s-link>

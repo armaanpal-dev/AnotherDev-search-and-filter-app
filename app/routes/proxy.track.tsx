@@ -7,25 +7,34 @@ import { jsonCors, clientKey } from "../lib/proxy.server";
 import { RateLimiter } from "../lib/cache.server";
 
 // POST apps/anotherdev-search/track
-//   { type: "click" | "add_to_cart", query, productId, st }
+//   { type: "click" | "add_to_cart" | "purchase", query, productId, st, … }
 //
-// CRO analytics beacon: attributes clicks and add-to-carts back to the search
-// that produced them, so the admin can report click-through and add-to-cart
-// rates. Also feeds the `popularity` signal that powers the "Most popular" sort
-// and the relevance tie-break.
+// CRO analytics beacon: attributes clicks, add-to-carts and completed orders
+// back to the search that produced them, so the admin can report click-through,
+// add-to-cart and search-driven revenue. Also feeds the `popularity` signal that
+// powers the "Most popular" sort and the relevance tie-break.
 //
-// Add-to-cart is the last event the storefront can observe. Checkout runs on
-// Shopify's own domain, so measuring actual purchases would need a Web Pixel
-// extension (and the scopes to install one) — deliberately not part of this app.
+// The storefront widget can only see as far as add-to-cart, because checkout
+// runs on Shopify's own domain. `purchase` therefore comes from the Web Pixel
+// extension in extensions/anotherdev-pixel, which Shopify runs inside checkout
+// and which posts back through this same proxy with the same session token.
 
 // How long after a search an action still counts as attributable to it.
 const ATTRIBUTION_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 // Relative weight each action contributes to a product's popularity score.
+// A purchase outranks an add-to-cart by as much as an add-to-cart outranks a
+// click: it is the only signal that survives a shopper changing their mind.
 const POPULARITY_WEIGHT: Record<string, number> = {
   click: 1,
   add_to_cart: 5,
+  purchase: 25,
 };
+
+// A purchase can arrive long after the search that caused it — a shopper who
+// browses, leaves and checks out an hour later is normal. Two hours is right for
+// a click; a day is right for money.
+const PURCHASE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * This endpoint accepts writes from anonymous storefront visitors, so it needs a
@@ -60,9 +69,70 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const sessionToken = String(payload.st ?? "").trim().slice(0, 64);
   const normalized = normalizeQuery(String(payload.query ?? ""));
-  const since = new Date(Date.now() - ATTRIBUTION_WINDOW_MS);
+  const isPurchase = type === "purchase";
+  const since = new Date(
+    Date.now() - (isPurchase ? PURCHASE_WINDOW_MS : ATTRIBUTION_WINDOW_MS),
+  );
 
   const productId = String(payload.productId ?? "").trim() || null;
+
+  // A completed order closes the loop from a search to money — the number the
+  // subscription is actually justified by. It arrives from the Web Pixel
+  // extension, which is the only surface that can see checkout: the storefront
+  // JS cannot, because checkout runs on Shopify's own domain.
+  //
+  // Everything here is shopper-reported and therefore untrusted, so the amount
+  // is clamped rather than believed: an unbounded value would let one forged
+  // beacon invent an arbitrary "search revenue" figure in the merchant's
+  // dashboard.
+  if (isPurchase) {
+    if (!sessionToken) return jsonCors({ ok: true });
+    const orderId = String(payload.orderId ?? "").trim().slice(0, 64) || null;
+    const revenue = Math.min(
+      1_000_000,
+      Math.max(0, Number(payload.revenue) || 0),
+    );
+
+    // One order attributes to one search, whatever the pixel retries.
+    if (orderId) {
+      const seen = await prisma.searchEvent.findFirst({
+        where: { shopId: shop.id, orderId },
+        select: { id: true },
+      });
+      if (seen) return jsonCors({ ok: true });
+    }
+
+    const target = await prisma.searchEvent.findFirst({
+      where: { shopId: shop.id, sessionToken, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    // No search in the window means this order owes nothing to search. Recording
+    // it anyway is how an app ends up claiming credit for the whole store.
+    if (!target) return jsonCors({ ok: true });
+
+    await prisma.searchEvent.update({
+      where: { id: target.id },
+      data: { purchased: true, converted: true, revenue, orderId },
+    });
+
+    // Purchased line items are the strongest ranking signal available.
+    const purchasedIds = Array.isArray(payload.productIds)
+      ? payload.productIds
+          .map((v: unknown) => String(v).trim())
+          .filter((v: string) => /^\d{1,20}$/.test(v))
+          .slice(0, 50)
+      : [];
+    if (purchasedIds.length) {
+      await prisma.product
+        .updateMany({
+          where: { shopId: shop.id, productId: { in: purchasedIds } },
+          data: { popularity: { increment: POPULARITY_WEIGHT.purchase } },
+        })
+        .catch(() => {});
+    }
+    return jsonCors({ ok: true });
+  }
 
   // Attribution requires a shopper session. Without one we cannot tell whose
   // search this action belongs to, and the previous code fell back to updating

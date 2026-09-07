@@ -1,0 +1,30 @@
+# AnotherDev Search — purchase attribution pixel.
+#
+# The storefront widget can see a shopper click a result and add it to the cart,
+# and then it goes blind: checkout runs on Shopify's own domain, where no theme
+# script is loaded. A Web Pixel is the only surface Shopify runs inside checkout,
+# so this is the one way to close the loop from a search to money — the number
+# that tells a merchant whether the app is worth its subscription.
+api_version = "2025-10"
+
+[[extensions]]
+name = "AnotherDev Search Attribution"
+handle = "anotherdev-pixel"
+uid = "f1d19641-7ee9-e5f3-0e70-0dbd8c6e051eb24df5d2"
+type = "web_pixel_extension"
+
+# Strict is the sandboxed runtime: no access to the storefront's window, DOM or
+# localStorage. It is the right trade-off — this pixel needs exactly two things,
+# a first-party cookie and a fetch, and both are available in the sandbox. `lax`
+# would hand it the whole page for no benefit and is harder to justify at review.
+runtime_context = "strict"
+
+runtime_configuration_definition = "./src/index.js"
+
+  [extensions.settings]
+  type = "object"
+
+    [extensions.settings.fields.proxyBase]
+    name = "App proxy base path"
+    description = "Where the storefront reaches this app, e.g. /apps/anotherdev-search"
+    type = "single_line_text_field"

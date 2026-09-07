@@ -9,6 +9,7 @@ import {
   proxyBase,
   escapeLiquidHtml as esc,
 } from "../lib/proxy.server";
+import { defuseLiquidDeep } from "../lib/search/normalize";
 import type {
   SortKey,
   FilterSelection,
@@ -81,6 +82,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const linkParams = shopperParams({ term, sort, filters, price, collection });
   const pagination = buildPagination(linkParams, base, page, totalPages);
   const facetNav = buildFacetLinks(linkParams, base, result.facets, filters);
+  const presetChips = buildPresetChips(result.presets ?? [], base, term);
+
+  // A dead end with no way out of it is the worst page in a search app, and the
+  // server-rendered half had exactly that: "try a different term" while the
+  // filters that caused the emptiness stayed applied and unmentioned. The JS
+  // grid has offered "clear all filters" all along; this is the same escape
+  // hatch as a real link, so it works without JavaScript and for a crawler.
+  const hasNarrowing = Object.keys(filters).length > 0 || !!price;
+  const clearParams = new URLSearchParams();
+  if (term) clearParams.set("q", term);
+  if (collection) clearParams.set("collection", collection);
+  const emptyState = `<div class="adsf-results__empty">
+    <p>${
+      hasNarrowing
+        ? "No products match all of those filters."
+        : "No products matched your search."
+    }</p>
+    ${
+      hasNarrowing
+        ? `<p><a class="adsf-results__clear" href="${esc(`${base}/results${qs(clearParams)}`)}">Clear all filters</a></p>`
+        : ""
+    }
+    ${
+      result.suggestion
+        ? `<p>Try <a href="${esc(base)}/results?q=${encodeURIComponent(result.suggestion)}">${esc(result.suggestion)}</a> instead.</p>`
+        : `<p><a href="${esc(base)}/results">Browse all products</a></p>`
+    }
+  </div>`;
 
   // Faceted URLs are near-infinite and near-duplicate. Let Google index the
   // clean query page and keep the filter permutations out of the index, or the
@@ -131,11 +160,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
         )}">${esc(result.suggestion)}</a>?</p>`
       : ""
   }
+  ${presetChips}
   ${facetNav}
   ${
     result.hits.length
       ? `<ul class="adsf-results__grid">${cards}</ul>${pagination}`
-      : `<p class="adsf-results__empty">No products matched your search. Try a different term.</p>`
+      : emptyState
   }
 </div>
 <style>
@@ -149,6 +179,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   .adsf-results__facets{display:flex;flex-wrap:wrap;gap:.4rem;margin:1rem 0}
   .adsf-results__facets a{font-size:.85rem;padding:.25rem .6rem;border:1px solid #ddd;border-radius:999px;text-decoration:none;color:inherit}
   .adsf-results__facets a[aria-pressed="true"]{background:#111;color:#fff;border-color:#111}
+  .adsf-results__presets{display:flex;flex-wrap:wrap;gap:.4rem;margin:1rem 0}
+  .adsf-results__presets a{font-size:.85rem;padding:.3rem .75rem;border:1px solid currentColor;border-radius:999px;text-decoration:none;color:inherit;opacity:.85}
+  .adsf-results__empty{padding:2rem 0;line-height:1.7}
+  .adsf-results__clear{font-weight:600}
   .adsf-results__pagination{display:flex;gap:.5rem;justify-content:center;margin:2rem 0}
   .adsf-results__pagination a,.adsf-results__pagination span{padding:.4rem .7rem;border:1px solid #ddd;border-radius:6px;text-decoration:none;color:inherit}
   .adsf-results__pagination [aria-current="page"]{background:#111;color:#fff;border-color:#111}
@@ -259,6 +293,48 @@ function buildFacetLinks(
   return groups ? `<nav aria-label="Filters">${groups}</nav>` : "";
 }
 
+/**
+ * Merchant-defined one-click shortcuts ("Under £50", "New in"), as real links.
+ *
+ * A preset is stored as a query fragment, so it can express combinations no
+ * single facet offers. Parsed through URLSearchParams rather than concatenated,
+ * so a malformed or hostile stored value becomes a harmless set of parameters
+ * the search endpoint already validates, never raw text in an href.
+ */
+function buildPresetChips(
+  presets: { label: string; params: string }[],
+  base: string,
+  term: string,
+): string {
+  if (!presets.length) return "";
+  const links = presets
+    .slice(0, 12)
+    .map((p) => {
+      const sp = new URLSearchParams();
+      if (term) sp.set("q", term);
+      let parsed: URLSearchParams;
+      try {
+        parsed = new URLSearchParams(p.params.replace(/^[?&]/, ""));
+      } catch {
+        return "";
+      }
+      for (const [k, v] of parsed.entries()) {
+        // Only the parameters the search endpoint understands. Anything else is
+        // a merchant typo, and rendering it would put junk in a crawlable URL.
+        if (k === "q" || k.startsWith("f.") || k === "price.min" || k === "price.max" || k === "sort") {
+          sp.append(k, v);
+        }
+      }
+      const href = `${base}/results${qs(sp)}`;
+      return `<a href="${esc(href)}" rel="nofollow">${esc(p.label)}</a>`;
+    })
+    .filter(Boolean)
+    .join("");
+  return links
+    ? `<nav class="adsf-results__presets" aria-label="Quick filters">${links}</nav>`
+    : "";
+}
+
 function pageUrl(params: URLSearchParams, base: string, p: number): string {
   const sp = new URLSearchParams(params);
   // Page 1 is the canonical, parameterless form.
@@ -303,9 +379,18 @@ function buildItemListJsonLd(
       },
     })),
   };
-  // `</script>` inside JSON would close the block early; `<` is also the Liquid
-  // -safe escape here since JSON strings accept \u.
-  return JSON.stringify(itemList).replace(/</g, "\\u003c");
+  // Two separate escapes, and both are load-bearing.
+  //
+  // `defuseLiquidDeep` first, over the VALUES: Shopify renders this whole
+  // response through the theme's Liquid engine, and this block was the one place
+  // on the page where a value reached it unescaped. The search term is
+  // shopper-controlled, so `?q={{ shop.email }}` was executed server-side in the
+  // merchant's context. It cannot be applied to the serialised string instead —
+  // JSON's own braces are structural.
+  //
+  // Then `<` -> < on the output, so a `</script>` inside any string cannot
+  // close the block early.
+  return JSON.stringify(defuseLiquidDeep(itemList)).replace(/</g, "\\u003c");
 }
 
 function buildPagination(
@@ -330,9 +415,22 @@ function buildPagination(
   return `<nav class="adsf-results__pagination" aria-label="Search results pages">${parts.join("")}</nav>`;
 }
 
+/**
+ * Prices, in the shop's own money format.
+ *
+ * This response is rendered through Liquid, so the `money` filter is available
+ * and is the only thing that knows the merchant's format — currency symbol,
+ * decimal separator, thousands separator, whether decimals appear at all. The
+ * previous `"USD 10.00"` was correct nowhere and disagreed with the JS grid,
+ * which has been reading `shop.money_format` all along.
+ *
+ * `money` takes cents, and the amount is rounded to an integer here so no
+ * shopper input or float artefact can reach the filter as something other than
+ * a number.
+ */
 function formatPriceRange(p: ProductHit): string {
-  const cur = p.currencyCode || "";
-  const fmt = (n: number) => `${cur} ${n.toFixed(2)}`.trim();
+  const cents = (n: number) => Math.max(0, Math.round(Number(n) * 100)) || 0;
+  const fmt = (n: number) => `{{ ${cents(n)} | money }}`;
   return p.priceMin === p.priceMax
     ? fmt(p.priceMin)
     : `${fmt(p.priceMin)} – ${fmt(p.priceMax)}`;

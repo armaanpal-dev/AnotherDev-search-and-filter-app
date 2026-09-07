@@ -7,8 +7,13 @@ application_url = "https://anotherdev-search-production.up.railway.app"
 embedded = true
 
 [access_scopes]
-# Read-only: we mirror the catalog into our own index, and never write to the store.
-scopes = "read_products,read_product_listings,read_collection_listings,read_inventory,read_content"
+# Read-only over the catalog: we mirror it into our own index and never write to
+# it. `write_pixels` + `read_customer_events` are the two exceptions, and they
+# buy exactly one thing: the Web Pixel that reports a completed order back to the
+# search that produced it. Checkout runs on Shopify's domain, so there is no
+# other way to measure search-driven revenue. The pixel reads no customer data —
+# see extensions/anotherdev-pixel/src/index.js.
+scopes = "read_products,read_product_listings,read_collection_listings,read_inventory,read_content,write_pixels,read_customer_events"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

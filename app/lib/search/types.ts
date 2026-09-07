@@ -38,6 +38,12 @@ export interface SearchQuery {
   typoTolerance?: boolean;
   // Merchant toggle: blend pgvector similarity into ranking (Pro + configured).
   semantic?: boolean;
+  // A/B bucket ("a" | "b"), derived from the shopper's session token. Decides
+  // which bucketed merchandising rules are eligible.
+  bucket?: string;
+  // Ask the engine to report HOW it ranked, for the admin's relevance tester.
+  // Off by default: it costs an extra column per row and is of no use to a shopper.
+  explain?: boolean;
 }
 
 export interface ProductHit {
@@ -92,9 +98,41 @@ export interface SearchResult {
   redirect?: string;
   // "did you mean" suggestion when results are thin.
   suggestion?: string;
+  // Merchant-defined one-click filter shortcuts, so the storefront can render
+  // them without a second request.
+  presets?: { label: string; params: string }[];
   // Debug/telemetry: which strategy produced the hits.
   strategy: "fulltext" | "fuzzy" | "hybrid" | "browse" | "sku" | "semantic";
   tookMs: number;
+  // Populated only when `explain` was requested. This is what makes the admin's
+  // relevance tester able to answer "why is THAT product first?" — without it a
+  // merchant can only see the order, never the reason.
+  explain?: SearchExplain;
+}
+
+/** Why the results came back in this order. Admin-only. */
+export interface SearchExplain {
+  normalizedTerm: string;
+  /** Query after synonym expansion, and the tsquery it produced. */
+  expansions: string[];
+  tsQuery: string;
+  /** Postgres text-search configuration used (stemming). */
+  language: string;
+  /** Which merchandising rule fired, if any. */
+  rule: { id: string; name: string; priority: number } | null;
+  /** Per-hit score components, keyed by productId. */
+  scores: Record<
+    string,
+    {
+      total: number;
+      textRank: number;
+      similarity: number;
+      semantic: number;
+      prefix: number;
+      popularity: number;
+      merchandising: number;
+    }
+  >;
 }
 
 export interface AutocompleteQuery {
@@ -128,13 +166,23 @@ export interface AutocompleteResult {
 }
 
 /** Product recommendations — same index, different surface (PDP, cart, empty search). */
-export type RecommendationKind = "related" | "trending" | "bestsellers" | "recent";
+export type RecommendationKind =
+  | "related"
+  | "trending"
+  | "bestsellers"
+  | "recent"
+  // Built from what THIS shopper has looked at, which the storefront keeps in
+  // localStorage and sends up. Nothing is stored server-side, so it needs no
+  // customer account and carries no profile.
+  | "personalized";
 
 export interface RecommendationQuery {
   shopId: string;
   kind: RecommendationKind;
   // Anchor product for "related" (Shopify product id, numeric part).
   productId?: string;
+  // Recently-viewed product ids for "personalized", newest first.
+  seenProductIds?: string[];
   collection?: string;
   limit: number;
   includeUnavailable?: boolean;

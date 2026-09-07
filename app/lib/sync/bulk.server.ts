@@ -8,6 +8,7 @@ import {
 import { syncCollectionsAndPages } from "./collections.server";
 import { embedPendingProducts } from "../search/embeddings.server";
 import { invalidateShopConfig } from "../search/config.server";
+import { toTsConfig } from "../search/languages";
 import { pruneAnalytics } from "../analytics.server";
 
 // admin.graphql is the client returned by authenticate.admin(request)
@@ -166,88 +167,214 @@ const FILTERABLE_METAFIELD_TYPES = new Set([
   "volume",
 ]);
 
-/**
- * Parse bulk JSONL. Nested connections arrive as separate lines carrying
- * __parentId; we group variants/collections/metafields under their product,
- * then normalise.
- */
-export function parseBulkJsonl(text: string): NormalizedProduct[] {
-  const products = new Map<string, RawProduct>();
-  const variantsByParent = new Map<string, RawVariant[]>();
-  const collectionsByParent = new Map<string, string[]>();
-  const metafieldsByParent = new Map<string, RawMetafield[]>();
+/** One product plus every child line that named it as parent. */
+interface ProductGroup {
+  product: RawProduct;
+  variants: RawVariant[];
+  collections: string[];
+  metafields: RawMetafield[];
+}
 
-  const push = <T>(map: Map<string, T[]>, key: string, value: T) => {
-    const arr = map.get(key);
-    if (arr) arr.push(value);
-    else map.set(key, [value]);
+/** Turn a grouped product into the shape the index stores. */
+function normalizeGroup(g: ProductGroup): NormalizedProduct {
+  const p = g.product;
+  const variants = g.variants.map((v) => ({
+    variantId: gidId(v.id),
+    title: v.title ?? "",
+    sku: v.sku ?? "",
+    price: Number(v.price ?? 0),
+    available: Boolean(v.availableForSale),
+    optionValues: Object.fromEntries(
+      (v.selectedOptions ?? []).map((o) => [o.name, o.value]),
+    ),
+  }));
+
+  return {
+    productId: gidId(p.id),
+    handle: p.handle,
+    title: p.title,
+    description: stripHtml(p.description ?? ""),
+    vendor: p.vendor ?? "",
+    productType: p.productType ?? "",
+    tags: p.tags ?? [],
+    status: p.status ?? "ACTIVE",
+    available: variants.some((v) => v.available),
+    // The export is already filtered to Online Store publications.
+    publishedOnline: true,
+    priceMin: Number(p.priceRangeV2?.minVariantPrice?.amount ?? 0),
+    priceMax: Number(p.priceRangeV2?.maxVariantPrice?.amount ?? 0),
+    currencyCode: p.priceRangeV2?.minVariantPrice?.currencyCode ?? "",
+    imageUrl: p.featuredImage?.url ?? null,
+    imageAlt: p.featuredImage?.altText ?? null,
+    options: optionsFromVariants(variants),
+    collections: g.collections,
+    metafields: normalizeMetafields(g.metafields),
+    publishedAt: p.publishedAt ? new Date(p.publishedAt) : null,
+    productUpdatedAt: p.updatedAt ? new Date(p.updatedAt) : null,
+    variants,
+  };
+}
+
+/**
+ * Sort one JSONL line into the group it belongs to.
+ *
+ * Nested connections arrive as their own lines carrying `__parentId`; only the
+ * product lines have none. Kept separate from the reader so both the streaming
+ * and the whole-string paths classify lines identically.
+ */
+function classifyLine(
+  obj: any,
+  groups: Map<string, ProductGroup>,
+  onProduct: (gid: string) => void,
+): void {
+  const id: string = obj.id ?? "";
+  const parent: string | undefined = obj.__parentId;
+
+  const group = (key: string) => {
+    let g = groups.get(key);
+    if (!g) {
+      // A child seen before its parent: hold an empty shell for it. Shopify
+      // normally emits the parent first, but nothing in the format guarantees it
+      // and a dropped product would be silent.
+      g = { product: { id: key } as RawProduct, variants: [], collections: [], metafields: [] };
+      groups.set(key, g);
+    }
+    return g;
   };
 
+  if (id.includes("/ProductVariant/")) {
+    if (parent) group(parent).variants.push(obj);
+  } else if (id.includes("/Metafield/") || (parent && obj.key != null)) {
+    // A metafield line is recognisable by `key` even with no id.
+    if (parent) group(parent).metafields.push(obj);
+  } else if (id.includes("/Collection/") || (parent && obj.handle && !id)) {
+    // A collection line carries a handle and a parent, and no product line
+    // ever has a __parentId, so this cannot swallow a product.
+    if (parent && obj.handle) group(parent).collections.push(obj.handle);
+  } else if (id.includes("/Product/")) {
+    group(id).product = obj;
+    onProduct(id);
+  }
+}
+
+/**
+ * Parse a whole bulk JSONL string. Kept for tests and small ad-hoc use; the sync
+ * itself uses `streamBulkJsonl`, which never holds the file in memory.
+ */
+export function parseBulkJsonl(text: string): NormalizedProduct[] {
+  const groups = new Map<string, ProductGroup>();
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+    try {
+      classifyLine(JSON.parse(trimmed), groups, () => {});
+    } catch {
+      continue;
+    }
+  }
+  const out: NormalizedProduct[] = [];
+  for (const g of groups.values()) {
+    if (g.product?.id) out.push(normalizeGroup(g));
+  }
+  return out;
+}
+
+/**
+ * Stream the bulk export, handing out fixed-size batches of products.
+ *
+ * The previous version did `await resp.text()` and then `split("\n")` — the
+ * entire export as one JS string, plus an array of every line, plus the parsed
+ * objects, all live at once. On a 512 MB container a large catalog ran the
+ * machine out of memory during the one operation it exists to perform.
+ *
+ * Here nothing is retained but the batch being filled and the groups still
+ * waiting for their children. Shopify emits a product's children immediately
+ * after it, so a group can be released as soon as the NEXT product line starts —
+ * `pendingGid` is that watermark. Anything still open at the end (a child that
+ * arrived out of order) is flushed by the final drain, so correctness does not
+ * depend on that ordering, only memory does.
+ *
+ * `onBatch` returning false stops the walk — that is how the Free plan's product
+ * limit avoids downloading and parsing a catalog it will not index.
+ */
+export async function streamBulkJsonl(
+  body: ReadableStream<Uint8Array>,
+  batchSize: number,
+  onBatch: (batch: NormalizedProduct[]) => Promise<boolean | void>,
+): Promise<number> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const groups = new Map<string, ProductGroup>();
+  let batch: NormalizedProduct[] = [];
+  let pendingGid: string | null = null;
+  let total = 0;
+  let stopped = false;
+  let carry = "";
+
+  const release = async (gid: string) => {
+    const g = groups.get(gid);
+    groups.delete(gid);
+    if (!g?.product?.id) return;
+    batch.push(normalizeGroup(g));
+    if (batch.length >= batchSize) {
+      total += batch.length;
+      const keepGoing = await onBatch(batch);
+      batch = [];
+      if (keepGoing === false) stopped = true;
+    }
+  };
+
+  const handleLine = async (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
     let obj: any;
     try {
       obj = JSON.parse(trimmed);
     } catch {
-      continue;
+      return;
     }
-    const id: string = obj.id ?? "";
-    if (id.includes("/ProductVariant/")) {
-      if (obj.__parentId) push(variantsByParent, obj.__parentId, obj);
-    } else if (id.includes("/Metafield/") || (obj.__parentId && obj.key != null)) {
-      // A metafield line is recognisable by `key` even with no id.
-      if (obj.__parentId) push(metafieldsByParent, obj.__parentId, obj);
-    } else if (id.includes("/Collection/") || (obj.__parentId && obj.handle && !id)) {
-      // A collection line carries a handle and a parent, and no product line
-      // ever has a __parentId, so this cannot swallow a product.
-      if (obj.__parentId && obj.handle)
-        push(collectionsByParent, obj.__parentId, obj.handle);
-    } else if (id.includes("/Product/")) {
-      products.set(id, obj);
-    }
-  }
-
-  const out: NormalizedProduct[] = [];
-  for (const [gid, p] of products) {
-    const rawVariants = variantsByParent.get(gid) ?? [];
-    const variants = rawVariants.map((v) => ({
-      variantId: gidId(v.id),
-      title: v.title ?? "",
-      sku: v.sku ?? "",
-      price: Number(v.price ?? 0),
-      available: Boolean(v.availableForSale),
-      optionValues: Object.fromEntries(
-        (v.selectedOptions ?? []).map((o) => [o.name, o.value]),
-      ),
-    }));
-
-    out.push({
-      productId: gidId(p.id),
-      handle: p.handle,
-      title: p.title,
-      description: stripHtml(p.description ?? ""),
-      vendor: p.vendor ?? "",
-      productType: p.productType ?? "",
-      tags: p.tags ?? [],
-      status: p.status ?? "ACTIVE",
-      available: variants.some((v) => v.available),
-      // The export is already filtered to Online Store publications.
-      publishedOnline: true,
-      priceMin: Number(p.priceRangeV2?.minVariantPrice?.amount ?? 0),
-      priceMax: Number(p.priceRangeV2?.maxVariantPrice?.amount ?? 0),
-      currencyCode: p.priceRangeV2?.minVariantPrice?.currencyCode ?? "",
-      imageUrl: p.featuredImage?.url ?? null,
-      imageAlt: p.featuredImage?.altText ?? null,
-      options: optionsFromVariants(variants),
-      collections: collectionsByParent.get(gid) ?? [],
-      metafields: normalizeMetafields(metafieldsByParent.get(gid) ?? []),
-      publishedAt: p.publishedAt ? new Date(p.publishedAt) : null,
-      productUpdatedAt: p.updatedAt ? new Date(p.updatedAt) : null,
-      variants,
+    let started: string | null = null;
+    classifyLine(obj, groups, (gid) => {
+      started = gid;
     });
+    if (started && started !== pendingGid) {
+      if (pendingGid) await release(pendingGid);
+      pendingGid = started;
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      carry += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = carry.indexOf("\n")) >= 0) {
+        const line = carry.slice(0, nl);
+        carry = carry.slice(nl + 1);
+        await handleLine(line);
+        if (stopped) return total;
+      }
+    }
+    carry += decoder.decode();
+    if (carry) await handleLine(carry);
+  } finally {
+    // Releasing the reader lets the socket close even when we stopped early.
+    try {
+      reader.releaseLock();
+    } catch {
+      // Already released, or the stream errored — nothing to recover.
+    }
   }
-  return out;
+
+  // Drain: the last product, plus any group whose parent line arrived late.
+  if (pendingGid) await release(pendingGid);
+  for (const gid of [...groups.keys()]) await release(gid);
+  if (batch.length) {
+    total += batch.length;
+    await onBatch(batch);
+  }
+  return total;
 }
 
 /** Flatten metafields to `namespace.key -> value`, filtered to facetable types. */
@@ -380,32 +507,59 @@ export async function runFullSync(
 
     let count = 0;
     let truncated = false;
+    // Attribute names seen while indexing. Collected here because this is the
+    // one pass that already touches every product — the Filters and
+    // Merchandising pages were each running `SELECT DISTINCT
+    // jsonb_object_keys(...)` over the whole Product table on every page load to
+    // learn the same thing.
+    const optionNames = new Set<string>();
+    const metafieldKeys = new Set<string>();
+
     if (url) {
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`Bulk result download failed (${resp.status})`);
-      const text = await resp.text();
-      const parsed = parseBulkJsonl(text);
-      // Free plan caps the indexed catalog; Pro is unlimited.
-      const toIndex = parsed.slice(0, productLimit);
-      truncated = parsed.length > toIndex.length;
+      if (!resp.body) throw new Error("Bulk result download returned no body");
 
-      // Enter the indexing phase with the known total, so the UI can show a
-      // real progress bar and "X of Y (Z left)".
+      // The stemming configuration is a per-row column because searchVector is a
+      // generated column; read it once and stamp it on everything this run writes.
+      const shopRow = await prisma.shop.findUnique({
+        where: { id: shopId },
+        select: { searchLanguage: true },
+      });
+      const tsConfig = toTsConfig(shopRow?.searchLanguage);
+
+      // The total is unknown until the stream ends, so the progress message
+      // counts up rather than showing a percentage of nothing.
       await beat({
         phase: "indexing",
-        progressTotal: toIndex.length,
+        progressTotal: 0,
         progressCurrent: 0,
-        message: `Indexing ${toIndex.length} products…`,
+        message: "Indexing your products…",
       });
 
-      for (let i = 0; i < toIndex.length; i += WRITE_CHUNK) {
-        const chunk = toIndex.slice(i, i + WRITE_CHUNK);
-        count += await upsertProductsBatch(shopId, chunk);
+      await streamBulkJsonl(resp.body, WRITE_CHUNK, async (batch) => {
+        // Free plan caps the indexed catalog; Pro is unlimited. Trimming here
+        // rather than after parsing means a capped shop never downloads the
+        // remainder of its export at all.
+        const room = productLimit - count;
+        const chunk = batch.length > room ? batch.slice(0, Math.max(0, room)) : batch;
+        if (chunk.length < batch.length) truncated = true;
+
+        for (const p of chunk) {
+          p.tsConfig = tsConfig;
+          for (const name of Object.keys(p.options ?? {})) optionNames.add(name);
+          for (const key of Object.keys(p.metafields ?? {})) metafieldKeys.add(key);
+        }
+
+        if (chunk.length) count += await upsertProductsBatch(shopId, chunk);
         await beat({
           progressCurrent: count,
-          message: `Indexing… ${count} of ${toIndex.length} products`,
+          progressTotal: count,
+          message: `Indexing… ${count.toLocaleString()} products`,
         });
-      }
+        // Stop the walk once the plan's ceiling is reached.
+        return count < productLimit;
+      });
     }
 
     // Reconcile: anything not touched by this run is gone from the catalog (or
@@ -438,6 +592,9 @@ export async function runFullSync(
         productCount: count,
         progressCurrent: count,
         progressTotal: count,
+        // Sorted so the admin's pickers are stable between syncs.
+        optionNames: [...optionNames].sort().slice(0, 100),
+        metafieldKeys: [...metafieldKeys].sort().slice(0, 100),
         message: truncated
           ? `Indexed ${count} products (Free plan limit — upgrade to index all)`
           : `Indexed ${count} products${removed.count ? `, removed ${removed.count} stale` : ""}${embedded ? `, embedded ${embedded}` : ""}`,

@@ -23,6 +23,10 @@ export interface WidgetSettings {
   showRecommendations: boolean; // recommendations when the box is empty
   recentSearches: boolean;      // remember this shopper's recent searches
   typoTolerance: boolean;
+  // Offer a microphone beside the search box where the browser supports it.
+  // Most storefront traffic is a phone, where typing is the slowest part of the
+  // journey; the Web Speech API is built in, so this costs nothing to ship.
+  voiceSearch: boolean;
   semanticSearch: boolean;      // blend embedding similarity into ranking (Pro)
   showOutOfStock: boolean;
   minChars: number;
@@ -68,6 +72,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   showRecommendations: true,
   recentSearches: true,
   typoTolerance: true,
+  voiceSearch: true,
   semanticSearch: false,
   showOutOfStock: false,
   minChars: 2,
@@ -106,6 +111,7 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     showRecommendations: bool(s.showRecommendations, DEFAULT_SETTINGS.showRecommendations),
     recentSearches: bool(s.recentSearches, DEFAULT_SETTINGS.recentSearches),
     typoTolerance: bool(s.typoTolerance, DEFAULT_SETTINGS.typoTolerance),
+    voiceSearch: bool(s.voiceSearch, DEFAULT_SETTINGS.voiceSearch),
     semanticSearch: bool(s.semanticSearch, DEFAULT_SETTINGS.semanticSearch),
     showOutOfStock: bool(s.showOutOfStock, DEFAULT_SETTINGS.showOutOfStock),
     minChars: num(s.minChars, DEFAULT_SETTINGS.minChars, 1, 4),

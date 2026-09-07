@@ -61,8 +61,23 @@ model Shop {
   // JSON blob of merchant-tunable settings (widget theming, enabled filters, CRO toggles…)
   settings     Json     @default("{}")
   onboarded    Boolean  @default(false)
+  // Set the first time the merchant completes the three setup steps, so the
+  // dashboard can stop nagging. `onboarded` alone was written by nothing.
+  onboardedAt  DateTime?
   // Last time old SearchEvent rows were pruned for this shop.
   analyticsPrunedAt DateTime?
+
+  // Postgres text-search configuration used for stemming. "simple" does no
+  // stemming at all (the safe default for a mixed or unknown catalog); a real
+  // language config makes "boots" find "boot". Validated against
+  // SEARCH_LANGUAGES in app/lib/search/languages.ts before it reaches SQL.
+  searchLanguage String @default("simple")
+
+  // Nightly catalog reconciliation. Webhooks miss edits (bulk edits, apps
+  // writing through the API, a dropped delivery), and a merchant will not
+  // re-sync by hand — so the index quietly drifts without this.
+  autoSyncEnabled Boolean   @default(true)
+  lastAutoSyncAt  DateTime?
 
   products      Product[]
   collections   Collection[]
@@ -73,6 +88,7 @@ model Shop {
   searchEvents  SearchEvent[]
   syncState     SyncState?
   filterConfig  FilterConfig[]
+  presets       FilterPreset[]
 
   updatedAt    DateTime @updatedAt
 }
@@ -154,6 +170,12 @@ model Product {
   // Set when the pgvector embedding for this row was last written; null = stale.
   embeddedAt   DateTime?
 
+  // The Postgres text-search configuration this row's `searchVector` was built
+  // with, mirrored from Shop.searchLanguage. It lives on the row (not read from
+  // Shop at query time) because `searchVector` is a STORED generated column: the
+  // config has to be an immutable input to the generation expression.
+  tsConfig     String   @default("simple")
+
   publishedAt  DateTime?
   productUpdatedAt DateTime? // updatedAt from Shopify
   indexedAt    DateTime @default(now())
@@ -165,6 +187,11 @@ model Product {
   @@index([shopId, status, publishedOnline, available])
   @@index([shopId, handle])
   @@index([shopId, embeddedAt])
+  // Browse and "best selling" order by these with no text predicate to narrow
+  // the set first, so without an index every unfiltered collection page sorts
+  // the whole catalog.
+  @@index([shopId, popularity])
+  @@index([shopId, publishedAt])
 }
 
 model ProductVariant {
@@ -232,9 +259,35 @@ model MerchandisingRule {
   //      action: "boost"|"bury"|"hide"|"pin", weight: 5 }]
   conditions Json     @default("[]")
   priority   Int      @default(0)
+  // Scheduling window. A sale rule that has to be switched on and off by hand at
+  // midnight is a rule that gets left on. Null on either side means unbounded.
+  startsAt   DateTime?
+  endsAt     DateTime?
+  // A/B bucket this rule applies to: "all", "a" or "b". Shoppers are assigned a
+  // stable bucket from their session token, so two merchandising strategies can
+  // run side by side and be compared in Analytics.
+  variant    String   @default("all")
   createdAt  DateTime @default(now())
 
   @@index([shopId, active])
+}
+
+/**
+ * A one-click filter shortcut ("Under $50", "New in"), rendered as a row of
+ * chips above the facets. It is just a saved query string, so it can express
+ * anything the URL can — including combinations no single facet offers.
+ */
+model FilterPreset {
+  id       String  @id @default(cuid())
+  shopId   String
+  shop     Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  label    String
+  // Shopper-facing query fragment, e.g. `price.max=50` or `f.tag=new&sort=newest`.
+  params   String
+  position Int     @default(0)
+  enabled  Boolean @default(true)
+
+  @@index([shopId, enabled])
 }
 
 model FilterConfig {
@@ -263,11 +316,22 @@ model SearchEvent {
   resultsCount  Int      @default(0)
   clickedProductId String?
   converted     Boolean  @default(false)
+  // Set by the Web Pixel when an order containing a searched-for product is
+  // completed. Checkout runs on Shopify's domain, so this is the only way to
+  // close the loop from a search to money.
+  purchased     Boolean  @default(false)
+  revenue       Float?
+  orderId       String?
+  // A/B bucket this shopper was in, so Analytics can compare two rule sets.
+  bucket        String?
   sessionToken  String?  // anonymous storefront session for CTR/CVR joins
   createdAt     DateTime @default(now())
 
   @@index([shopId, createdAt])
   @@index([shopId, normalized])
+  // The attribution lookup in proxy/track filters on all three and orders by
+  // createdAt. Without this it scanned every event the shop ever recorded.
+  @@index([shopId, sessionToken, createdAt])
 }
 
 // --- Sync bookkeeping ---
@@ -289,5 +353,13 @@ model SyncState {
   progressCurrent Int   @default(0)
   progressTotal   Int   @default(0)
   message      String?
+
+  // Attribute names discovered during the last sync, cached here so the Filters
+  // and Merchandising pages can offer them without running
+  // `SELECT DISTINCT jsonb_object_keys(...)` — a full scan of Product — on every
+  // page load.
+  optionNames    String[] @default([])
+  metafieldKeys  String[] @default([])
+
   updatedAt    DateTime @updatedAt
 }

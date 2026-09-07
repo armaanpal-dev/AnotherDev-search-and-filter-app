@@ -36,10 +36,15 @@ Typesense / Algolia later is one new class in
 | Catalog sync (Bulk Operations + webhooks) | [app/lib/sync/](app/lib/sync/) |
 | Storefront JSON search API (App Proxy) | [app/routes/proxy.search.tsx](app/routes/proxy.search.tsx) |
 | Autocomplete | [app/routes/proxy.autocomplete.tsx](app/routes/proxy.autocomplete.tsx) |
-| Recommendations (related / trending / bestsellers) | [app/routes/proxy.recommend.tsx](app/routes/proxy.recommend.tsx) |
+| Recommendations (related / personalised / trending / bestsellers) | [app/routes/proxy.recommend.tsx](app/routes/proxy.recommend.tsx) |
 | **SEO** crawlable results page + JSON-LD | [app/routes/proxy.results.tsx](app/routes/proxy.results.tsx) |
 | **AIO** machine-readable feed for AI shopping agents | [app/routes/proxy.ai.tsx](app/routes/proxy.ai.tsx) |
-| **CRO** click / add-to-cart attribution beacon | [app/routes/proxy.track.tsx](app/routes/proxy.track.tsx) |
+| **AIO** llms.txt pointing agents at the feed | [app/routes/proxy.llms.tsx](app/routes/proxy.llms.tsx) |
+| **CRO** click / add-to-cart / purchase attribution beacon | [app/routes/proxy.track.tsx](app/routes/proxy.track.tsx) |
+| Purchase attribution inside checkout (Web Pixel) | [extensions/anotherdev-pixel/](extensions/anotherdev-pixel/) |
+| Relevance tester (why did that rank there?) | [app/routes/app.preview.tsx](app/routes/app.preview.tsx) |
+| Per-shop stemming language | [app/lib/search/languages.ts](app/lib/search/languages.ts) |
+| Nightly catalog reconciliation | [app/routes/cron.sync.tsx](app/routes/cron.sync.tsx) |
 | Storefront widget (theme app extension) | [extensions/anotherdev-search/](extensions/anotherdev-search/) |
 | Search analytics aggregation + retention | [app/lib/analytics.server.ts](app/lib/analytics.server.ts) |
 | Admin UI | [app/routes/app.*.tsx](app/routes/) |
@@ -71,29 +76,34 @@ takeover.
   carries the same signals for parsers that don't.
 - **AIO** — `/apps/anotherdev-search/ai` returns schema.org-typed products plus a
   self-describing `usage` block so LLM shopping agents can query and refine the
-  catalog.
+  catalog, and `/apps/anotherdev-search/llms` is the llms.txt that tells an agent
+  the feed exists at all.
 - **CRO** — mobile-first filter drawer with a focus trap, applied-filter chips,
-  swatches, skeleton loading (no layout shift), instant autocomplete, quick
-  add-to-cart, zero-result "did you mean" recovery, and click→add-to-cart
-  attribution surfaced in Analytics.
+  merchant-defined quick filters, swatches, per-facet search and "show more",
+  skeleton loading (no layout shift), instant autocomplete, voice search, quick
+  add-to-cart, zero-result "did you mean" recovery, and click → add-to-cart →
+  **purchase** attribution surfaced in Analytics.
 
 ## Access scopes
 
-Every scope is **read-only** — the app mirrors the catalog into its own index and
-never writes to the store.
+Nothing in the catalog is ever written — the app mirrors it into its own index.
 
 | Scope | Why |
 |-------|-----|
 | `read_products`, `read_product_listings`, `read_collection_listings`, `read_inventory`, `read_content` | mirror the catalog into the index |
+| `write_pixels`, `read_customer_events` | install the checkout pixel that attributes completed orders back to a search |
 
 ### How far analytics can see
 
-Click-through and add-to-cart are both attributed to the exact search that
-produced them. **Completed orders are not measured**: checkout runs on Shopify's
-own domain, outside the theme, so a storefront script cannot observe it. Doing so
-would require a Web Pixel extension plus the `read_customer_events` and
-`write_pixels` scopes — a deliberate trade of measurement depth for staying
-read-only and never prompting merchants to re-approve.
+Click-through and add-to-cart come from the storefront widget. **Completed orders
+come from a Web Pixel**, because checkout runs on Shopify's own domain where no
+theme script is loaded — it is the only surface that can close the loop from a
+search to money, which is the number the subscription is justified by.
+
+The pixel reads the order total, its line-item product ids, and the anonymous
+`adsf_st` cookie the search widget already sets. It reads no customer
+identifiers, and a merchant switches it on per shop from Settings; nothing is
+installed on a store that has not asked for it.
 
 ## Local setup
 
@@ -154,8 +164,21 @@ CI provisions one (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
 ## Data & privacy
 
 The app stores **no customer PII** — only the product index, merchant config, and
-anonymous search analytics. Shoppers get a random id in `localStorage` (`adsf_st`)
-so a click or add-to-cart can be joined back to the search that produced it; it
-never leaves the browser except on those beacons, and is not linked to a customer
-account, an email, or anything Shopify identifies a person by. Raw analytics rows are pruned after `ANALYTICS_RETENTION_DAYS` (default 180).
+anonymous search analytics.
+
+Shoppers get a random id (`adsf_st`) so a click, add-to-cart or completed order
+can be joined back to the search that produced it. It is held in `localStorage`
+**and** in a first-party cookie: the checkout pixel runs in Shopify's sandbox on a
+different origin and cannot read `localStorage`, so the cookie is the only thing
+both halves can see. It is generated in the browser, never linked to a customer
+account, an email or anything Shopify identifies a person by, and is cleared from
+stored analytics after `ANALYTICS_SESSION_TOKEN_RETENTION_HOURS` (default 24) —
+long enough to attribute, short enough that the retained history carries no
+per-shopper identifier at all.
+
+"Recently viewed", which drives the personalised recommendation rail, lives only
+in the shopper's own `localStorage` and is sent up as request input. No profile
+is stored server-side.
+
+Raw analytics rows are pruned after `ANALYTICS_RETENTION_DAYS` (default 180).
 GDPR webhooks are implemented in [app/routes/webhooks.*.tsx](app/routes/).

@@ -2,7 +2,12 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getSearchEngine } from "../lib/search/index.server";
 import { recordSearchEvent } from "../lib/analytics.server";
-import { parseSearchParams, jsonCors, loadProxyShop } from "../lib/proxy.server";
+import {
+  parseSearchParams,
+  jsonCors,
+  loadProxyShop,
+  bucketFor,
+} from "../lib/proxy.server";
 
 // GET apps/anotherdev-search/search?q=...&page=1&sort=relevance&f.vendor=Nike&...
 // Served on the merchant's own domain via App Proxy → first-party, SEO-friendly.
@@ -18,6 +23,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { term, page, perPage, sort, filters, price, collection } =
     parseSearchParams(url.searchParams, { perPage: settings.resultsPerPage });
 
+  // Stable A/B arm for this shopper, so a bucketed merchandising rule applies
+  // consistently across paging and refinement rather than flipping per request.
+  const sessionToken = url.searchParams.get("st") ?? undefined;
+  const bucket = bucketFor(sessionToken);
+
   const result = await getSearchEngine().search({
     shopId: shop.shopId,
     term,
@@ -31,18 +41,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     includeUnavailable: settings.showOutOfStock,
     typoTolerance: settings.typoTolerance,
     semantic: settings.semanticSearch,
+    bucket,
   });
 
   // Fire-and-forget analytics. Only a genuinely NEW search is counted: paging,
   // sorting and filter refinement all re-hit this endpoint with the same term,
   // and counting those inflated every metric (searches, CTR, conversion rate).
-  const sessionToken = url.searchParams.get("st") ?? undefined;
   if (term && isNewSearch({ page, sort, filters, price })) {
     void recordSearchEvent({
       shopId: shop.shopId,
       term,
       resultsCount: result.total,
       sessionToken,
+      bucket,
     });
   }
 

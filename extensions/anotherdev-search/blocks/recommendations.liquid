@@ -43,11 +43,12 @@
       "default": "related",
       "options": [
         { "value": "related", "label": "Related to this product" },
+        { "value": "personalized", "label": "Based on what this shopper viewed" },
         { "value": "trending", "label": "Trending in search this week" },
         { "value": "bestsellers", "label": "Best sellers" },
         { "value": "recent", "label": "New arrivals" }
       ],
-      "info": "\"Related\" needs a product page. Elsewhere it falls back to best sellers."
+      "info": "\"Related\" needs a product page. \"Based on what this shopper viewed\" uses products they opened on this device — nothing is stored about them. Both fall back to best sellers when there is nothing to go on."
     },
     { "type": "range", "id": "limit", "label": "How many products", "min": 4, "max": 16, "step": 2, "default": 8 },
     { "type": "text", "id": "collection_scope", "label": "Limit to a collection (handle)", "info": "Optional." },

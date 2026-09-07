@@ -9,6 +9,17 @@
 (function () {
   "use strict";
 
+  // Load exactly once.
+  //
+  // Every block emits its own <script src> tag, so a merchant running the app
+  // embed AND placing a search bar gets this file executed twice: two dropdowns
+  // fighting over the same input, two `document` click handlers, two requests
+  // per keystroke, and — worst — two `track` beacons per click, which silently
+  // doubled every product's popularity score. The browser fetches the file once
+  // and runs it per tag, so the guard has to be here rather than in the Liquid.
+  if (window.__adsfLoaded) return;
+  window.__adsfLoaded = true;
+
   // --- money -------------------------------------------------------------
   // Prices are indexed in the SHOP's currency. A shopper in another market sees
   // a converted, differently formatted price, so rendering the raw number with
@@ -104,18 +115,85 @@
    * it is never sent to the server on unrelated requests.
    */
   var sessionToken = (function () {
+    var k = "adsf_st";
+    var v = "";
     try {
-      var k = "adsf_st";
-      var v = localStorage.getItem(k);
-      if (!v) {
-        v = Math.random().toString(36).slice(2) + Date.now().toString(36);
-        localStorage.setItem(k, v);
-      }
-      return v;
+      v = localStorage.getItem(k) || "";
+    } catch (e) {
+      // Private browsing or storage disabled.
+    }
+    if (!v) {
+      // Fall back to the cookie, so a shopper who cleared localStorage but not
+      // cookies keeps the same id — and so the two never disagree.
+      v = readCookie(k);
+    }
+    if (!v) {
+      v = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+    try {
+      localStorage.setItem(k, v);
+    } catch (e) {
+      // Nothing to do; the cookie below still carries it.
+    }
+    // Also a first-party cookie, and this is not redundant.
+    //
+    // The Web Pixel that attributes completed orders runs in Shopify's sandbox
+    // on a DIFFERENT origin, so it cannot see this page's localStorage at all.
+    // A cookie on the shop's own domain is the only thing both halves can read,
+    // which is what lets a purchase find the search that caused it.
+    writeCookie(k, v);
+    return v;
+  })();
+
+  function readCookie(name) {
+    try {
+      var m = new RegExp("(?:^|;\\s*)" + name + "=([^;]+)").exec(document.cookie || "");
+      return m ? decodeURIComponent(m[1]) : "";
     } catch (e) {
       return "";
     }
-  })();
+  }
+
+  function writeCookie(name, value) {
+    try {
+      // Lax, not None: this is only ever read first-party, and Lax survives the
+      // top-level navigation into checkout, which is exactly when it is needed.
+      document.cookie =
+        name + "=" + encodeURIComponent(value) +
+        ";path=/;max-age=31536000;SameSite=Lax" +
+        (location.protocol === "https:" ? ";Secure" : "");
+    } catch (e) {
+      // Cookies blocked — attribution degrades, nothing else does.
+    }
+  }
+
+  /**
+   * Products this shopper has looked at, newest first.
+   *
+   * Local only, capped, and never sent anywhere except as the input to a
+   * recommendation request — so there is no profile stored on the server and
+   * nothing to reconcile when a shopper clears their browser.
+   */
+  var VIEWED_KEY = "adsf_viewed";
+  function recentlyViewed() {
+    try {
+      var list = JSON.parse(localStorage.getItem(VIEWED_KEY) || "[]");
+      return Array.isArray(list) ? list.filter(function (v) { return /^\d+$/.test(String(v)); }) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function rememberViewed(productId) {
+    var id = String(productId || "").trim();
+    if (!/^\d+$/.test(id)) return;
+    try {
+      var list = recentlyViewed().filter(function (v) { return String(v) !== id; });
+      list.unshift(id);
+      localStorage.setItem(VIEWED_KEY, JSON.stringify(list.slice(0, 20)));
+    } catch (e) {
+      // Storage disabled — the rail falls back to best sellers server-side.
+    }
+  }
 
   // Recent searches, per shopper, local only.
   var RECENT_KEY = "adsf_recent";
@@ -157,6 +235,11 @@
   }
 
   function escapeRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  // Monotonic id source for facet checkboxes. Deriving an id from the value
+  // collided whenever two values normalised the same ("Red" / "Red!"), which
+  // pointed a <label> at the wrong box.
+  var facetUid = 0;
 
   // Bold the matched query words inside a label (like the reference apps).
   function highlight(text, term) {
@@ -223,7 +306,11 @@
   function populateDropdown(dropdown, data, term, cfg) {
     dropdown.innerHTML = "";
     var items = [];
-    var isEmpty = !term; // empty query → recommendation mode
+    // Empty query -> recommendation mode. A photo search also carries no term,
+    // but it is a RESULT, not an idle panel, so it must not be labelled
+    // "Popular products" or padded with this shopper's recent searches.
+    var isVisual = !!data.visual;
+    var isEmpty = !term && !isVisual;
     var hasProducts = data.products && data.products.length;
     var hasColl = data.collections && data.collections.length;
     var hasPages = data.pages && data.pages.length;
@@ -234,7 +321,11 @@
     if (!hasProducts && !hasColl && !hasPages && !hasSugg) {
       dropdown.classList.remove("adsf-dropdown--rich");
       dropdown.appendChild(el("div", "adsf-dropdown__empty",
-        isEmpty ? "Start typing to search" : "No matches for “" + esc(term) + "”"));
+        isVisual
+          ? "Nothing in the catalog looks like that photo"
+          : isEmpty
+            ? "Start typing to search"
+            : "No matches for “" + esc(term) + "”"));
       return items;
     }
 
@@ -296,7 +387,7 @@
     }
 
     if (hasProducts) {
-      var pg = section(isEmpty ? "Popular products" : "Products");
+      var pg = section(isVisual ? "Closest matches" : isEmpty ? "Popular products" : "Products");
       data.products.forEach(function (p) {
         var a = el("a", "adsf-dropdown__product");
         a.href = "/products/" + encodeURIComponent(p.handle);
@@ -338,7 +429,7 @@
       });
     }
 
-    if (!isEmpty) {
+    if (!isEmpty && !isVisual) {
       var all = el("a", "adsf-dropdown__all");
       all.href = cfg.resultsUrl + "?q=" + encodeURIComponent(term);
       all.textContent = "See all results";
@@ -458,7 +549,15 @@
   // =======================================================================
   //  1. Autocomplete search bar (theme block)
   // =======================================================================
+  /** Has this element already been wired up? Guards every init entry point. */
+  function claim(node) {
+    if (node.getAttribute("data-adsf-init")) return false;
+    node.setAttribute("data-adsf-init", "1");
+    return true;
+  }
+
   function initSearchBar(root, globalCfg) {
+    if (!claim(root)) return;
     var input = root.querySelector("[data-adsf-input]");
     var dropdown = root.querySelector("[data-adsf-dropdown]");
     if (!input || !dropdown) return;
@@ -470,7 +569,11 @@
     });
     var minChars = parseInt(root.getAttribute("data-min-chars") || cfg.minChars || "2", 10);
     var limit = parseInt(root.getAttribute("data-max-suggestions") || cfg.maxSuggestions || "6", 10);
-    var showRecs = root.getAttribute("data-recommendations") !== "false";
+    // From the merchant's setting, not from an attribute nothing ever writes.
+    // `data-recommendations` is not rendered by search-bar.liquid, so this was
+    // permanently true and "Show recommendations when the box is empty" did
+    // nothing at all for the block — only for the auto-attached theme input.
+    var showRecs = cfg.showRecs !== false;
 
     var request = makeSequencer();
     var ctx = { items: [] };
@@ -529,8 +632,116 @@
       });
     }
 
+    attachVoiceSearch(input, "inline", cfg, function () {
+      run();
+    });
+    attachImageSearch(input, "inline", cfg, function (data) {
+      render(data, "");
+    });
+
     document.addEventListener("click", function (e) {
       if (!root.contains(e.target)) ctx.close();
+    });
+  }
+
+  /**
+   * Speak instead of type.
+   *
+   * More than half of storefront traffic is a phone, where typing "merino wool
+   * crew neck" is the slowest part of the whole journey. The Web Speech API is
+   * built into the browser, so this costs nothing and ships no dependency —
+   * and when the browser does not have it, no button is rendered at all rather
+   * than one that does nothing.
+   */
+  function attachVoiceSearch(input, mode, cfg, onResult) {
+    var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition || input.getAttribute("data-adsf-voice")) return;
+    if (cfg && cfg.voiceSearch === false) return;
+    input.setAttribute("data-adsf-voice", "1");
+
+    var btn = el("button", "adsf-voice");
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Search by voice");
+    btn.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">' +
+      '<rect x="7" y="2" width="6" height="10" rx="3" stroke="currentColor" stroke-width="2"/>' +
+      '<path d="M4 9a6 6 0 0 0 12 0M10 15v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+
+    if (mode === "inline") {
+      // Our own block: the markup is ours, so the button can sit in the flow.
+      var mount = input.parentNode;
+      if (!mount) return;
+      mount.insertBefore(btn, input.nextSibling);
+    } else {
+      // The theme's own search box. Injecting into a theme's markup is how you
+      // break someone's header, so the button floats over the input instead:
+      // fixed position, placed from the input's rect, kept there by the same
+      // scroll/resize handling the dropdown already uses. Nothing in the
+      // theme's DOM is touched.
+      btn.classList.add("adsf-voice--floating");
+      document.body.appendChild(btn);
+      var place = function () {
+        var r = input.getBoundingClientRect();
+        // A box too small to have spared the room, or scrolled out of view.
+        var visible = r.width > 120 && r.height > 20 && r.bottom > 0 && r.top < window.innerHeight;
+        btn.hidden = !visible;
+        if (!visible) return;
+        btn.style.top = r.top + (r.height - 28) / 2 + "px";
+        btn.style.left = r.right - 34 + "px";
+      };
+      place();
+      var reposition = rafThrottle(place);
+      window.addEventListener("resize", reposition);
+      window.addEventListener("scroll", reposition, true);
+    }
+
+    var recognition = null;
+    var listening = false;
+
+    btn.addEventListener("click", function () {
+      if (listening && recognition) {
+        recognition.stop();
+        return;
+      }
+      try {
+        recognition = new Recognition();
+      } catch (e) {
+        btn.remove();
+        return;
+      }
+      recognition.lang = document.documentElement.lang || "en";
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = function () {
+        listening = true;
+        btn.classList.add("is-listening");
+        btn.setAttribute("aria-label", "Stop listening");
+      };
+      recognition.onresult = function (event) {
+        var text = "";
+        for (var i = event.resultIndex; i < event.results.length; i++) {
+          text += event.results[i][0].transcript;
+        }
+        input.value = text.trim();
+        // Let the theme's own listeners see the change too.
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        if (event.results[event.results.length - 1].isFinal) onResult();
+      };
+      var stop = function () {
+        listening = false;
+        btn.classList.remove("is-listening");
+        btn.setAttribute("aria-label", "Search by voice");
+      };
+      recognition.onend = stop;
+      // A denied microphone permission must leave the box usable, not stuck.
+      recognition.onerror = stop;
+
+      try {
+        recognition.start();
+      } catch (e) {
+        stop();
+      }
     });
   }
 
@@ -538,6 +749,7 @@
   //  2. Faceted results application
   // =======================================================================
   function initResultsApp(root, globalCfg) {
+    if (!claim(root)) return;
     // The facet UI is presented four ways; the stylesheet does the work, so
     // switching layout is one class rather than four render paths.
     var layout = (globalCfg && globalCfg.filterLayout) || "sidebar";
@@ -728,11 +940,58 @@
       apply(true);
     }
 
+    /**
+     * One-click shortcuts the merchant defined ("Under 50", "New in").
+     *
+     * Rendered above the removable chips and only while nothing is narrowed:
+     * once a shopper is filtering, the chips below are the controls that matter
+     * and a second row of them is just noise.
+     */
+    function renderPresets() {
+      if (!chips || hasActiveFilters()) return;
+      var presets = (cfg.presets || []).slice(0, 12);
+      if (!presets.length) return;
+      presets.forEach(function (preset) {
+        if (!preset || !preset.label || !preset.params) return;
+        var b = el("button", "adsf-chip adsf-chip--preset");
+        b.type = "button";
+        b.textContent = preset.label;
+        b.addEventListener("click", function () {
+          var sp;
+          try {
+            sp = new URLSearchParams(String(preset.params).replace(/^[?&]/, ""));
+          } catch (e) {
+            return;
+          }
+          var filters = {};
+          var min = null;
+          var max = null;
+          var sort = state.sort;
+          sp.forEach(function (v, k) {
+            if (k.indexOf("f.") === 0) (filters[k.slice(2)] = filters[k.slice(2)] || []).push(v);
+            else if (k === "price.min") min = v;
+            else if (k === "price.max") max = v;
+            else if (k === "sort") sort = v;
+          });
+          state.filters = filters;
+          state.priceMin = min;
+          state.priceMax = max;
+          state.sort = sort;
+          state.page = 1;
+          apply(true);
+        });
+        chips.appendChild(b);
+      });
+    }
+
     /** Removable chips for everything currently applied. */
     function renderChips() {
       if (!chips) return;
       chips.innerHTML = "";
-      if (!hasActiveFilters()) return;
+      if (!hasActiveFilters()) {
+        renderPresets();
+        return;
+      }
 
       // Reads as words rather than symbols: an open-ended range rendered as
       // "10-∞", which means nothing to a shopper.
@@ -856,12 +1115,34 @@
       return wrap;
     }
 
+    // How many values a facet shows before it needs "show more". Fifty open
+    // checkboxes per facet, six facets deep, is a sidebar nobody reads.
+    var FACET_VISIBLE = 8;
+    // Above this, scanning the list is slower than typing what you want.
+    var FACET_SEARCHABLE = 12;
+
     function listFacet(f) {
+      var wrap = el("div", "adsf-facet__values");
       var list = el("ul", "adsf-facet__list");
       var selected = state.filters[f.source] || [];
-      f.values.forEach(function (v) {
+      var rows = [];
+
+      // Selected values first: after narrowing, what you chose must not be
+      // hidden behind "show more".
+      var ordered = f.values.slice().sort(function (a, b) {
+        var aSel = selected.indexOf(a.value) >= 0 ? 0 : 1;
+        var bSel = selected.indexOf(b.value) >= 0 ? 0 : 1;
+        return aSel - bSel;
+      });
+
+      ordered.forEach(function (v, index) {
         var li = el("li", "adsf-facet__item" + (f.displayAs === "swatch" ? " adsf-facet__item--swatch" : ""));
-        var id = "adsf_" + f.source.replace(/[^a-z0-9]/gi, "") + "_" + String(v.value).replace(/[^a-z0-9]/gi, "");
+        // Unique per row, not derived from the value.
+        //
+        // Stripping non-alphanumerics collapsed "Red" and "Red!" (and "X L" and
+        // "XL") to the same id, so the <label> pointed at the wrong checkbox and
+        // clicking one toggled the other.
+        var id = "adsf_" + facetUid++;
         var checked = selected.indexOf(v.value) >= 0;
         var cb = el("input");
         cb.type = "checkbox"; cb.id = id; cb.checked = checked; cb.value = v.value;
@@ -871,11 +1152,66 @@
         if (f.displayAs === "swatch") {
           lbl.innerHTML = '<span class="adsf-swatch" style="' + swatchStyle(v.value, v, cfg) + '" title="' + esc(v.label) + '"></span>';
         }
-        lbl.insertAdjacentHTML("beforeend", '<span class="adsf-facet__label">' + esc(v.label) + '</span> <span class="adsf-facet__count">' + v.count + "</span>");
+        var count = cfg.showFacetCounts === false
+          ? ""
+          : ' <span class="adsf-facet__count">' + v.count + "</span>";
+        lbl.insertAdjacentHTML("beforeend", '<span class="adsf-facet__label">' + esc(v.label) + "</span>" + count);
         li.appendChild(cb); li.appendChild(lbl);
         list.appendChild(li);
+        rows.push({ li: li, text: String(v.label || v.value).toLowerCase(), index: index });
       });
-      return list;
+
+      // Type to narrow the list. Only where it earns its space: on a facet with
+      // five values a search box is noise.
+      var query = "";
+      var expanded = false;
+
+      if (f.values.length > FACET_SEARCHABLE) {
+        var finder = el("input", "adsf-facet__find");
+        finder.type = "search";
+        finder.placeholder = "Filter " + f.label.toLowerCase();
+        finder.setAttribute("aria-label", "Filter " + f.label + " options");
+        finder.addEventListener("input", function () {
+          query = finder.value.trim().toLowerCase();
+          // Typing is an explicit request to see everything that matches.
+          if (query) expanded = true;
+          applyVisibility();
+        });
+        wrap.appendChild(finder);
+      }
+
+      wrap.appendChild(list);
+
+      var more = null;
+      if (f.values.length > FACET_VISIBLE) {
+        more = el("button", "adsf-facet__more");
+        more.type = "button";
+        more.addEventListener("click", function () {
+          expanded = !expanded;
+          applyVisibility();
+        });
+        wrap.appendChild(more);
+      }
+
+      function applyVisibility() {
+        var shown = 0;
+        rows.forEach(function (row) {
+          var matches = !query || row.text.indexOf(query) >= 0;
+          var withinLimit = expanded || shown < FACET_VISIBLE;
+          var visible = matches && withinLimit;
+          row.li.hidden = !visible;
+          if (matches) shown++;
+        });
+        if (more) {
+          var hiddenCount = Math.max(0, shown - FACET_VISIBLE);
+          more.hidden = !expanded && hiddenCount === 0;
+          more.textContent = expanded ? "Show less" : "Show " + hiddenCount + " more";
+          more.setAttribute("aria-expanded", String(expanded));
+        }
+      }
+
+      applyVisibility();
+      return wrap;
     }
 
     /**
@@ -976,6 +1312,7 @@
   //  3. Recommendation rail
   // =======================================================================
   function initRecommendations(root, globalCfg) {
+    if (!claim(root)) return;
     var cfg = Object.assign({}, globalCfg || {}, {
       proxy: root.getAttribute("data-proxy") || (globalCfg && globalCfg.proxy) || "/apps/anotherdev-search",
       moneyFormat: root.getAttribute("data-money-format") || (globalCfg && globalCfg.moneyFormat),
@@ -986,9 +1323,20 @@
     var limit = parseInt(root.getAttribute("data-limit") || "8", 10);
     var track_ = root.querySelector("[data-adsf-rec-track]") || root;
 
+    // A product page is where "recently viewed" is worth recording: it is the
+    // strongest statement of interest a shopper makes without buying.
+    if (productId) rememberViewed(productId);
+
     var qs = "kind=" + encodeURIComponent(kind) + "&limit=" + limit +
       (productId ? "&productId=" + encodeURIComponent(productId) : "") +
       (collection ? "&collection=" + encodeURIComponent(collection) : "");
+
+    // The personalised rail is built from what THIS shopper has looked at, so
+    // the ids travel with the request. Nothing is stored server-side.
+    if (kind === "personalized") {
+      var seen = recentlyViewed();
+      if (seen.length) qs += "&seen=" + encodeURIComponent(seen.join(","));
+    }
 
     fetch(cfg.proxy + "/recommend?" + qs, { headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); })
@@ -1138,11 +1486,164 @@
       });
     }
 
+    attachVoiceSearch(input, "floating", cfg, function () {
+      run();
+    });
+    attachImageSearch(input, "floating", cfg, function (data) {
+      render(data, "");
+    });
+
     var reposition = rafThrottle(function () { if (!dropdown.hidden) place(); });
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
     document.addEventListener("click", function (e) {
-      if (e.target !== input && !dropdown.contains(e.target)) ctx.close();
+      // The mic sits over the theme's input, so a click on it must not be read
+      // as a click away from the panel.
+      if (e.target !== input && !dropdown.contains(e.target) &&
+          !(e.target.closest && e.target.closest(".adsf-voice"))) ctx.close();
+    });
+  }
+
+  /**
+   * Search by photo.
+   *
+   * A shopper who has seen something and cannot name it has no way to search for
+   * it — this gives them one. The button is only rendered once the server has
+   * confirmed the shop can actually serve it (Pro, a multimodal provider, and
+   * pgvector), so it never appears as a control that does nothing.
+   *
+   * The photo is downscaled in the browser before it is sent: a modern phone
+   * camera produces several megabytes, the model uses a fraction of that, and
+   * the shopper is on mobile data.
+   */
+  var visualAvailable = null;
+  function checkVisualSearch(cfg) {
+    // Tri-state on purpose: null means "not asked yet", so an explicit false is
+    // remembered and the shop is not probed again on every focus.
+    if (visualAvailable === true || visualAvailable === false) {
+      return Promise.resolve(visualAvailable);
+    }
+    return fetch(cfg.proxy + "/visual", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        visualAvailable = !!(d && d.available);
+        return visualAvailable;
+      })
+      .catch(function () {
+        visualAvailable = false;
+        return false;
+      });
+  }
+
+  /** Downscale to at most `max` on the long edge and re-encode as JPEG. */
+  function shrinkImage(file, max) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var scale = Math.min(1, max / Math.max(img.width, img.height));
+          var canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.82));
+        } catch (e) {
+          reject(e);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("unreadable image"));
+      };
+      img.src = url;
+    });
+  }
+
+  function attachImageSearch(input, mode, cfg, render) {
+    if (input.getAttribute("data-adsf-visual")) return;
+    input.setAttribute("data-adsf-visual", "1");
+
+    checkVisualSearch(cfg).then(function (ok) {
+      if (!ok) return;
+
+      var file = el("input");
+      file.type = "file";
+      file.accept = "image/*";
+      // `capture` opens the camera directly on a phone, which is where this is
+      // used; on a desktop the attribute is ignored and it is a file picker.
+      file.setAttribute("capture", "environment");
+      file.className = "adsf-visually-hidden";
+
+      var btn = el("button", "adsf-camera" + (mode === "floating" ? " adsf-camera--floating" : ""));
+      btn.type = "button";
+      btn.setAttribute("aria-label", "Search with a photo");
+      btn.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">' +
+        '<rect x="2" y="5" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2"/>' +
+        '<circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="2"/>' +
+        '<path d="M7 5l1.2-2h3.6L13 5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+
+      if (mode === "floating") {
+        document.body.appendChild(btn);
+        var place = function () {
+          var r = input.getBoundingClientRect();
+          var visible = r.width > 150 && r.height > 20 && r.bottom > 0 && r.top < window.innerHeight;
+          btn.hidden = !visible;
+          if (!visible) return;
+          btn.style.top = r.top + (r.height - 28) / 2 + "px";
+          // Sits inboard of the microphone, which claims the rightmost slot.
+          btn.style.left = r.right - 66 + "px";
+        };
+        place();
+        var reposition = rafThrottle(place);
+        window.addEventListener("resize", reposition);
+        window.addEventListener("scroll", reposition, true);
+      } else if (input.parentNode) {
+        input.parentNode.insertBefore(btn, input.nextSibling);
+      } else {
+        return;
+      }
+      document.body.appendChild(file);
+
+      btn.addEventListener("click", function () { file.click(); });
+
+      file.addEventListener("change", function () {
+        var chosen = file.files && file.files[0];
+        if (!chosen) return;
+        btn.classList.add("is-busy");
+        shrinkImage(chosen, 640)
+          .then(function (dataUrl) {
+            return fetch(cfg.proxy + "/visual", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({ image: dataUrl, limit: cfg.maxSuggestions || 8 }),
+            });
+          })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            render({
+              products: (d && d.products) || [],
+              suggestions: [],
+              collections: [],
+              pages: [],
+              // Tells the panel this is a photo result, so it does not label an
+              // empty term as "Popular products" and offer recent searches.
+              visual: true,
+            });
+          })
+          .catch(function () {
+            // Nothing to show and nothing to explain — the shopper still has the
+            // box they were typing in.
+          })
+          .then(function () {
+            btn.classList.remove("is-busy");
+            // Let the same photo be picked twice in a row.
+            file.value = "";
+          });
+      });
     });
   }
 
@@ -1322,6 +1823,7 @@
   function initThemeGridFacets(cfg, handle, grid, preloadedFacets) {
     var section = sectionIdFor(grid);
     if (!section) return false;
+    if (document.querySelector("[data-adsf-themegrid]")) return false;
 
     // Honour the merchant's Filter layout choice instead of always going
     // horizontal. "sidebar" wraps the theme's grid in two columns so the
@@ -1580,10 +2082,51 @@
     var toggle = panel.querySelector("[data-adsf-filter-toggle]");
     var facetsEl = panel.querySelector("[data-adsf-facets]");
     if (toggle && facetsEl) {
-      toggle.addEventListener("click", function () {
-        var open = !facetsEl.classList.contains("is-open");
+      // The drawer this opens on a phone covers the page, so it needs the same
+      // treatment the results-app drawer already had: a backdrop to click, the
+      // page behind locked, focus moved in and trapped, and Escape to leave.
+      // Without those it was a panel a keyboard user could tab out of, behind,
+      // and never find their way back from.
+      var backdrop = el("div", "adsf-drawer-backdrop");
+      backdrop.hidden = true;
+      panel.appendChild(backdrop);
+      var lastFocused = null;
+
+      var focusables = function () {
+        return facetsEl.querySelectorAll(
+          'button, input, select, a[href], [tabindex]:not([tabindex="-1"])',
+        );
+      };
+
+      var openDrawer = function (open) {
         facetsEl.classList.toggle("is-open", open);
+        backdrop.hidden = !open;
         toggle.setAttribute("aria-expanded", String(open));
+        facetsEl.setAttribute("aria-modal", String(open));
+        document.body.style.overflow = open ? "hidden" : "";
+        if (open) {
+          lastFocused = document.activeElement;
+          var f = focusables();
+          if (f.length) f[0].focus();
+        } else if (lastFocused && lastFocused.focus) {
+          lastFocused.focus();
+        }
+      };
+
+      toggle.addEventListener("click", function () {
+        openDrawer(!facetsEl.classList.contains("is-open"));
+      });
+      backdrop.addEventListener("click", function () { openDrawer(false); });
+
+      facetsEl.addEventListener("keydown", function (e) {
+        if (!facetsEl.classList.contains("is-open")) return;
+        if (e.key === "Escape") { openDrawer(false); return; }
+        if (e.key !== "Tab") return;
+        var f = focusables();
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       });
     }
 
@@ -1881,6 +2424,8 @@
     cfg.showVendor = !!s.showVendor;
     cfg.quickAdd = !!s.quickAdd;
     cfg.swatches = s.swatches || {};
+    cfg.presets = Array.isArray(s.presets) ? s.presets : [];
+    cfg.voiceSearch = s.voiceSearch !== false;
     if (s.proxy) {
       cfg.proxy = s.proxy;
       // resultsUrl is DERIVED from the proxy base. The app embed hardcodes the
@@ -1935,9 +2480,31 @@
       showVendor: false,
       quickAdd: false,
       swatches: {},
+      presets: [],
+      voiceSearch: true,
     };
 
+    /**
+     * Note the product being viewed, wherever the shopper arrived from.
+     *
+     * The recommendation block records this, but only on pages that carry one.
+     * Shopify publishes the current product on every product page, so reading it
+     * here means the personalised rail works from the first PDP a shopper opens
+     * rather than from the first one that happens to have the rail on it.
+     */
+    function noteCurrentProduct() {
+      try {
+        var meta = window.ShopifyAnalytics &&
+          window.ShopifyAnalytics.meta &&
+          window.ShopifyAnalytics.meta.product;
+        if (meta && meta.id) rememberViewed(meta.id);
+      } catch (e) {
+        // Theme without the analytics globals; the block still records.
+      }
+    }
+
     function start() {
+      noteCurrentProduct();
       // Blocks the merchant placed explicitly always win over takeover.
       Array.prototype.forEach.call(document.querySelectorAll("[data-adsf-searchbar]"), function (n) {
         initSearchBar(n, cfg);

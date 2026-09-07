@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import { getShopByDomain } from "../lib/shop.server";
 import { resolveSettings } from "../lib/settings";
 import { jsonCors, proxyBase } from "../lib/proxy.server";
@@ -15,6 +16,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const settings = resolveSettings(shop?.settings);
   const url = new URL(request.url);
 
+  // One-click filter shortcuts. Served with the config rather than with the
+  // results so the chips render on first paint, before any search has run.
+  const presets = shop
+    ? await prisma.filterPreset.findMany({
+        where: { shopId: shop.id, enabled: true },
+        orderBy: { position: "asc" },
+        take: 12,
+        select: { label: true, params: true },
+      })
+    : [];
+
   const body = {
     ...settings,
     // The merchant can change the App Proxy subpath, so the storefront must be
@@ -22,6 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     proxy: proxyBase(url.searchParams),
     // Lets the widget avoid advertising Pro-only behaviour on a Free shop.
     plan: shop?.planName ?? "free",
+    presets,
   };
 
   return jsonCors(body, 200, {

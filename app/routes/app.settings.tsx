@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
 import { Prisma } from "@prisma/client";
@@ -5,14 +6,16 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
-import { resolveSettings, mergeSettings } from "../lib/settings";
+import { resolveSettings, mergeSettings, type WidgetSettings } from "../lib/settings";
 import { getPlanStatus } from "../lib/billing.server";
 import { semanticReady } from "../lib/search/embeddings.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
+import { SEARCH_LANGUAGES, toTsConfig } from "../lib/search/languages";
+import { ensureWebPixel, removeWebPixel, getPixelState } from "../lib/pixel.server";
 import { TILES } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session, billing } = await authenticate.admin(request);
+  const { session, billing, admin } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
   const { limits } = await getPlanStatus(billing, shop.planOverride);
   const isPro = limits.semantic;
@@ -20,17 +23,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     settings: resolveSettings(shop.settings),
     domain: shop.domain,
     isPro,
+    searchLanguage: toTsConfig(shop.searchLanguage),
+    autoSyncEnabled: shop.autoSyncEnabled,
     // Semantic search needs BOTH an embeddings provider configured on the server
     // and the pgvector column in Postgres; without either the toggle would be a
     // switch wired to nothing.
     semanticAvailable: await semanticReady(),
+    pixel: await getPixelState(admin),
   };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
   const f = await request.formData();
+
+  // Purchase tracking is its own action: installing or removing a Web Pixel is a
+  // call to Shopify, not a column, and it must not be silently coupled to
+  // pressing Save on an unrelated colour change.
+  const intent = String(f.get("intent") ?? "");
+  if (intent === "pixelOn" || intent === "pixelOff") {
+    const result =
+      intent === "pixelOn" ? await ensureWebPixel(admin) : await removeWebPixel(admin);
+    return result.ok
+      ? { ok: true, pixelChanged: intent === "pixelOn" ? "on" : "off" }
+      : { ok: false, error: result.error };
+  }
 
   // A checkbox that is off submits nothing, so "was this field on the form?" is
   // answered by a hidden companion field rather than by the checkbox's absence.
@@ -57,6 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     showRecommendations: checkbox("showRecommendations"),
     recentSearches: checkbox("recentSearches"),
     typoTolerance: checkbox("typoTolerance"),
+    voiceSearch: checkbox("voiceSearch"),
     semanticSearch: checkbox("semanticSearch"),
     showOutOfStock: checkbox("showOutOfStock"),
     collectionFilters: checkbox("collectionFilters"),
@@ -85,10 +104,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     swatches: parseSwatchText(field("swatchText")),
   });
 
+  // Stemming language and auto-sync are columns on Shop, not widget settings:
+  // the engine reads them without loading the settings blob, and the language
+  // has to be mirrored onto every product row.
+  const language = toTsConfig(field("searchLanguage") ?? shop.searchLanguage);
+  const autoSync = present("autoSyncEnabled")
+    ? f.get("autoSyncEnabled") === "on"
+    : shop.autoSyncEnabled;
+
   await prisma.shop.update({
     where: { id: shop.id },
-    data: { settings: settings as unknown as Prisma.InputJsonObject },
+    data: {
+      settings: settings as unknown as Prisma.InputJsonObject,
+      searchLanguage: language,
+      autoSyncEnabled: autoSync,
+    },
   });
+
+  // Changing the language rewrites every product's `tsConfig`, which is an input
+  // to the generated `searchVector` — so Postgres recomputes the index entries
+  // itself. Done in SQL rather than row by row: this is one statement over the
+  // catalog, not a re-sync, and search stays correct throughout because the
+  // query side reads the same value.
+  if (language !== toTsConfig(shop.searchLanguage)) {
+    await prisma.$executeRaw`
+      UPDATE "Product" SET "tsConfig" = ${language} WHERE "shopId" = ${shop.id}`;
+  }
+
   invalidateShopConfig(shop.id);
   return { ok: true };
 };
@@ -114,13 +156,61 @@ function swatchesToText(swatches: Record<string, string>): string {
 }
 
 export default function SettingsPage() {
-  const { settings, domain, isPro, semanticAvailable } = useLoaderData<typeof loader>();
+  const { settings, domain, isPro, semanticAvailable, searchLanguage, autoSyncEnabled, pixel } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  const pixelFetcher = useFetcher<typeof action>();
   const s = settings;
   const busy = fetcher.state !== "idle";
   // Only after a completed submit: fetcher.data survives, so checking it alone
   // would leave the banner up while a second save is in flight.
   const saved = fetcher.state === "idle" && Boolean(fetcher.data?.ok);
+  const error =
+    (fetcher.data && "error" in fetcher.data && fetcher.data.error) ||
+    (pixelFetcher.data && "error" in pixelFetcher.data && pixelFetcher.data.error) ||
+    null;
+
+  // Live preview state.
+  //
+  // Editing eight colours and four layout switches with no way to see the result
+  // meant saving, opening the storefront in another tab, and going back — for an
+  // app whose whole pitch is how the search looks. This mirrors the form into
+  // state so the preview redraws as it is edited, without a save.
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const [draft, setDraft] = useState<WidgetSettings>(settings);
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    // Native listeners, not React's onChange: these are form-associated custom
+    // elements, and React's synthetic events do not reliably see their `input`.
+    const read = () => {
+      const data = new FormData(form);
+      const patch: Record<string, unknown> = {};
+      for (const [key, value] of data.entries()) {
+        if (key.startsWith("_present.") || key === "intent") continue;
+        patch[key] = value === "on" ? true : value;
+      }
+      // A checkbox that is off submits nothing, so the presence markers are what
+      // distinguish "unticked" from "not on the form" — same rule the action uses.
+      for (const [key] of data.entries()) {
+        if (!key.startsWith("_present.")) continue;
+        const name = key.slice("_present.".length);
+        if (!(name in patch)) patch[name] = false;
+      }
+      if (typeof patch.swatchText === "string") {
+        patch.swatches = parseSwatchText(patch.swatchText) ?? {};
+        delete patch.swatchText;
+      }
+      setDraft(mergeSettings(settings, patch));
+    };
+    form.addEventListener("input", read);
+    form.addEventListener("change", read);
+    return () => {
+      form.removeEventListener("input", read);
+      form.removeEventListener("change", read);
+    };
+  }, [settings]);
 
   return (
     <s-page heading="Settings">
@@ -135,6 +225,8 @@ export default function SettingsPage() {
       >
         Save
       </s-button>
+
+      {error && <s-banner tone="critical">{String(error)}</s-banner>}
 
       {saved && (
         <s-banner tone="success" heading="Settings saved" dismissible>
@@ -152,11 +244,24 @@ export default function SettingsPage() {
           <Live label="Collection filters" on={s.collectionFilters} />
           <Live label="Typo tolerance" on={s.typoTolerance} />
           <Live label="Quick add to cart" on={s.quickAdd} />
+          <Live label="Revenue tracking" on={pixel === "active"} />
         </s-grid>
         <s-text color="subdued">Storefront: {domain}</s-text>
       </s-section>
 
-      <fetcher.Form method="post" id="adsf-settings">
+      {/* The preview sits above the form so it stays in view while the controls
+          below it are edited. */}
+      <s-section heading="Preview">
+        <s-paragraph>
+          <s-text color="subdued">
+            This is your search, drawn with the settings below. It updates as you
+            edit — nothing is saved until you press Save.
+          </s-text>
+        </s-paragraph>
+        <WidgetPreview settings={draft} />
+      </s-section>
+
+      <fetcher.Form method="post" id="adsf-settings" ref={formRef}>
         {/* s-page only spaces its DIRECT s-section children. With the form in
             between, every section card stacked flush against the next, so the
             gap has to be supplied here. */}
@@ -179,6 +284,11 @@ export default function SettingsPage() {
             <Check name="showRecommendations" checked={s.showRecommendations} label="Show recommendations when the search box is empty" />
             <Check name="recentSearches" checked={s.recentSearches} label="Remember each shopper's recent searches" />
             <Check name="typoTolerance" checked={s.typoTolerance} label="Typo tolerance (fuzzy matching)" />
+            <Check
+              name="voiceSearch"
+              checked={s.voiceSearch}
+              label="Let shoppers search by voice (where their browser supports it)"
+            />
             <Check name="showOutOfStock" checked={s.showOutOfStock} label="Include out-of-stock products in results" />
             <s-grid gridTemplateColumns="1fr 1fr" gap="base">
               <s-number-field name="minChars" label="Min characters to trigger" min={1} max={4} defaultValue={String(s.minChars)} />
@@ -225,6 +335,26 @@ export default function SettingsPage() {
 
         <s-section heading="Relevance">
           <s-stack direction="block" gap="base">
+            {/* Stemming. "simple" matches words exactly, which is right for a
+                catalog of product codes and brand names and wrong for prose:
+                without it "boots" never finds "boot". Changing this rewrites the
+                index for this store, which Postgres does itself. */}
+            <s-select
+              name="searchLanguage"
+              label="Match word endings as"
+              value={searchLanguage}
+              details="Lets “boots” find “boot”, and “running” find “run”. Pick the language most of your product text is written in."
+            >
+              {SEARCH_LANGUAGES.map((l) => (
+                <s-option key={l.value} value={l.value}>{l.label}</s-option>
+              ))}
+            </s-select>
+            <s-text color="subdued">
+              Changing this re-indexes your catalog in the background. Search keeps
+              working throughout, and you can check the result in{" "}
+              <s-link href="/app/preview">Test search</s-link>.
+            </s-text>
+
             {semanticAvailable ? (
               <>
                 <Check
@@ -277,6 +407,10 @@ export default function SettingsPage() {
                 <s-option value="400">Regular</s-option>
                 <s-option value="500">Medium</s-option>
                 <s-option value="600">Semibold</s-option>
+                {/* resolveSettings has always accepted 700; leaving it out of the
+                    picker meant a shop set to Bold silently dropped to Regular
+                    the first time anyone saved this form. */}
+                <s-option value="700">Bold</s-option>
               </s-select>
             </s-grid>
           </s-stack>
@@ -298,8 +432,73 @@ export default function SettingsPage() {
             placeholder={"royal blue = #4169e1\nheather grey = #b0b0b0\ncamo = https://cdn.example.com/camo.png"}
           />
         </s-section>
+        <s-section heading="Keeping the index current">
+          <s-stack direction="block" gap="base">
+            <Check
+              name="autoSyncEnabled"
+              checked={autoSyncEnabled}
+              label="Re-check my catalog once a day"
+            />
+            <s-text color="subdued">
+              Product changes reach the index through webhooks within seconds. A
+              nightly pass catches what webhooks cannot: a dropped delivery, a bulk
+              edit through the API, or a very large collection whose membership was
+              deferred. It costs you nothing and runs while the store is quiet.
+            </s-text>
+          </s-stack>
+        </s-section>
         </s-stack>
       </fetcher.Form>
+
+      {/* Outside the settings form on purpose: this installs or removes a Web
+          Pixel through Shopify, which is a different kind of action from saving
+          a colour and should not ride along with it. */}
+      <s-section heading="Revenue tracking">
+        <s-stack direction="block" gap="base">
+          <s-stack direction="inline" gap="small-500" alignItems="center">
+            <s-text type="strong">Search-driven revenue</s-text>
+            <s-badge tone={pixel === "active" ? "success" : undefined}>
+              {pixel === "active" ? "On" : pixel === "unavailable" ? "Needs permission" : "Off"}
+            </s-badge>
+          </s-stack>
+          <s-text color="subdued">
+            Your storefront can see a shopper click a result and add it to the cart,
+            and then it goes blind — checkout runs on Shopify&rsquo;s own domain, not
+            yours. Turning this on adds a small pixel that Shopify runs inside
+            checkout and that reports completed orders back to the search that
+            produced them. It reads no customer details: only the order total, its
+            line items, and the anonymous session id the search widget already uses.
+          </s-text>
+          {pixel === "unavailable" ? (
+            <s-banner tone="warning" heading="Reinstall needed">
+              <s-paragraph>
+                This store was installed before revenue tracking existed, so it has
+                not approved the permission the pixel needs. Reinstall the app from
+                your Apps page to approve it.
+              </s-paragraph>
+            </s-banner>
+          ) : (
+            <pixelFetcher.Form method="post">
+              <input
+                type="hidden"
+                name="intent"
+                value={pixel === "active" ? "pixelOff" : "pixelOn"}
+              />
+              <s-button
+                type="submit"
+                variant={pixel === "active" ? "secondary" : "primary"}
+                {...(pixelFetcher.state !== "idle" ? { loading: true } : {})}
+              >
+                {pixel === "active" ? "Turn off revenue tracking" : "Turn on revenue tracking"}
+              </s-button>
+            </pixelFetcher.Form>
+          )}
+          <s-text color="subdued">
+            Results appear in <s-link href="/app/analytics">Analytics</s-link> as orders
+            come in.
+          </s-text>
+        </s-stack>
+      </s-section>
 
       <s-section slot="aside" heading="How to turn it on">
         <s-paragraph>
@@ -368,5 +567,253 @@ function Live({ label, on }: { label: string; on: boolean }) {
 function ColorField({ name, label, value }: { name: string; label: string; value: string }) {
   return <s-color-field name={name} label={label} defaultValue={value} />;
 }
+
+/**
+ * A drawing of the storefront widget, using the settings currently in the form.
+ *
+ * Deliberately inline-styled, which is the one place in this admin that is the
+ * right call: this is a rendering of STOREFRONT css, driven by merchant-chosen
+ * values, and every one of those values is validated by `resolveSettings` before
+ * it gets here — the colour regex there is what makes putting them in a style
+ * attribute safe. Using Polaris tokens instead would show the merchant the
+ * admin's colours, which is the opposite of the point.
+ *
+ * It is a static drawing, not a live widget: no requests, no interactivity, no
+ * chance of it disagreeing with the real thing because it drifted its own logic.
+ */
+function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
+  const rich = p.layout === "rich";
+  const radius =
+    p.filterButtonShape === "square" ? "0" : p.filterButtonShape === "rounded" ? "8px" : "999px";
+
+  const panel: React.CSSProperties = {
+    background: p.backgroundColor,
+    color: p.textColor,
+    fontSize: `${p.fontSize}px`,
+    fontWeight: Number(p.fontWeight),
+    border: "1px solid rgba(0,0,0,.12)",
+    borderRadius: "12px",
+    boxShadow: "0 10px 30px rgba(0,0,0,.12)",
+    overflow: "hidden",
+  };
+
+  const label: React.CSSProperties = {
+    textTransform: "uppercase",
+    letterSpacing: ".06em",
+    fontSize: "0.68em",
+    fontWeight: 600,
+    opacity: 0.55,
+    padding: "0.5em 0.7em 0.25em",
+  };
+
+  const swatchFor = (name: string) =>
+    p.swatches[name.toLowerCase()] ??
+    ({ red: "#d33", blue: "#26c", black: "#111" } as Record<string, string>)[name.toLowerCase()] ??
+    "#ccc";
+
+  const products = [
+    { title: "Merino Wool Crew Neck", vendor: "Northbound", price: "£89.00" },
+    { title: "Merino Beanie", vendor: "Northbound", price: "£24.00" },
+    { title: "Lambswool Scarf", vendor: "Harlow", price: "£38.00" },
+  ].slice(0, Math.max(2, Math.min(3, p.maxSuggestions)));
+
+  return (
+    <s-box padding="base" background="subdued" borderRadius="base">
+      <div style={{ display: "grid", gap: "1.25rem" }}>
+        {/* --- Search panel --- */}
+        <div style={{ maxWidth: rich ? 620 : 380 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              border: "1px solid rgba(0,0,0,.18)",
+              borderRadius: 8,
+              overflow: "hidden",
+              background: "#fff",
+              marginBottom: 6,
+            }}
+          >
+            <span style={{ flex: 1, padding: "0.5rem 0.75rem", fontSize: 14, color: "#555" }}>
+              merino
+            </span>
+            <span
+              style={{
+                background: p.accentColor,
+                color: "#fff",
+                padding: "0.5rem 0.85rem",
+                fontSize: 13,
+              }}
+            >
+              Search
+            </span>
+          </div>
+
+          <div style={panel}>
+            <div
+              style={{
+                display: rich ? "grid" : "block",
+                gridTemplateColumns: rich ? "200px 1fr" : undefined,
+                direction: rich && p.previewSide === "right" ? "rtl" : "ltr",
+              }}
+            >
+              {rich && (
+                <div
+                  style={{
+                    direction: "ltr",
+                    padding: "0.75em",
+                    borderInlineEnd: "1px solid rgba(0,0,0,.08)",
+                    display: "grid",
+                    gap: 6,
+                    alignContent: "start",
+                  }}
+                >
+                  <div style={{ aspectRatio: "1/1", background: "rgba(0,0,0,.06)", borderRadius: 8 }} />
+                  <div style={{ fontWeight: 600 }}>{products[0].title}</div>
+                  <div style={{ fontWeight: 700 }}>{products[0].price}</div>
+                  <span style={{ color: p.accentColor, fontWeight: 600, fontSize: "0.85em" }}>
+                    See details
+                  </span>
+                </div>
+              )}
+
+              <div style={{ direction: "ltr", padding: "0.25em" }}>
+                <div style={label}>Products</div>
+                {products.map((prod) => (
+                  <div
+                    key={prod.title}
+                    style={{
+                      display: "flex",
+                      gap: "0.6em",
+                      alignItems: "center",
+                      padding: "0.45em 0.6em",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 6,
+                        background: "rgba(0,0,0,.07)",
+                        flex: "none",
+                      }}
+                    />
+                    <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                      <span>
+                        <mark
+                          style={{
+                            background: "transparent",
+                            color: p.highlightColor,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Merino
+                        </mark>
+                        {prod.title.replace(/^Merino/, "")}
+                      </span>
+                      {p.showVendor && (
+                        <span style={{ opacity: 0.6, fontSize: "0.85em" }}>{prod.vendor}</span>
+                      )}
+                      <span style={{ fontWeight: 600 }}>{prod.price}</span>
+                    </span>
+                  </div>
+                ))}
+                <div
+                  style={{
+                    borderTop: "1px solid rgba(0,0,0,.08)",
+                    padding: "0.55em 0.6em",
+                    color: p.accentColor,
+                    fontWeight: 600,
+                  }}
+                >
+                  See all results
+                </div>
+              </div>
+            </div>
+          </div>
+          <s-text color="subdued">
+            {p.panelStyle === "spotlight" ? "Spotlight panel" : "Dropdown panel"} ·{" "}
+            {rich ? `Rich, preview on the ${p.previewSide}` : "Simple list"}
+          </s-text>
+        </div>
+
+        {/* --- Filters + grid --- */}
+        <div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            {["Price", "Brand", "Size"].map((f, i) => (
+              <span
+                key={f}
+                style={{
+                  padding: "0.4em 0.85em",
+                  fontSize: 13,
+                  borderRadius: radius,
+                  border: "1px solid rgba(0,0,0,.2)",
+                  background: i === 0 ? p.filterActiveBg : p.filterButtonBg,
+                  color: i === 0 ? p.filterActiveText : p.filterButtonText,
+                }}
+              >
+                {f}
+                {p.showFacetCounts ? ` (12)` : ""}
+              </span>
+            ))}
+            {["Red", "Blue", "Black"].map((c) => (
+              <span
+                key={c}
+                title={c}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  background: swatchFor(c),
+                  border: "1px solid rgba(0,0,0,.2)",
+                }}
+              />
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${p.gridColumns}, 1fr)`,
+              gap: 12,
+            }}
+          >
+            {Array.from({ length: p.gridColumns }).map((_, i) => (
+              <div key={i} style={{ fontSize: `${p.fontSize}px`, color: p.textColor }}>
+                <div
+                  style={{ aspectRatio: "1/1", background: "rgba(0,0,0,.07)", borderRadius: 8 }}
+                />
+                <div style={{ marginTop: 6, fontWeight: Number(p.fontWeight) }}>Product name</div>
+                {p.showVendor && (
+                  <div style={{ opacity: 0.6, fontSize: "0.85em" }}>Brand</div>
+                )}
+                <div style={{ fontWeight: 600 }}>£00.00</div>
+                {p.quickAdd && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      padding: "0.35em 0",
+                      textAlign: "center",
+                      borderRadius: radius,
+                      background: p.accentColor,
+                      color: "#fff",
+                      fontSize: "0.85em",
+                    }}
+                  >
+                    Add to cart
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <s-text color="subdued">
+            {p.gridColumns} columns · filters as a {p.filterLayout} · {p.resultsPerPage} per page
+          </s-text>
+        </div>
+      </div>
+    </s-box>
+  );
+}
+
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

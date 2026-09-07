@@ -24,6 +24,10 @@ export interface NormalizedProduct {
   options: Record<string, string[]>;
   collections: string[];
   metafields: Record<string, string>;
+  // Postgres text-search configuration for this row's generated searchVector,
+  // stamped from Shop.searchLanguage by whichever writer produced this record.
+  // Optional because a webhook has no reason to change it — see FULL_SYNC_ONLY.
+  tsConfig?: string;
   publishedAt: Date | null;
   productUpdatedAt: Date | null;
   variants: {

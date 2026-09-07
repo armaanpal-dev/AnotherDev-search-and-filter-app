@@ -11,7 +11,12 @@
   data-min-chars="{{ block.settings.min_chars | default: 2 }}"
   data-max-suggestions="{{ block.settings.max_suggestions | default: 6 }}"
   data-money-format="{{ shop.money_format | escape }}"
-  style="--adsf-accent: {{ block.settings.accent_color }};"
+  {%- comment -%}
+    Escaped like every other interpolated setting. A colour picker only ever
+    yields a hex value, but a style attribute is the wrong place to rely on that:
+    nothing in the schema stops a theme export being hand-edited.
+  {%- endcomment -%}
+  style="--adsf-accent: {{ block.settings.accent_color | escape }};"
 >
   <form class="adsf-searchbar__form" role="search" action="{{ block.settings.results_page | default: '/apps/anotherdev-search/results' }}" method="get">
     <input

@@ -11,10 +11,12 @@ import {
 } from "./normalize";
 import { embedQuery, semanticReady, toVectorLiteral } from "./embeddings.server";
 import { limitsForPlanName } from "../plans";
+import { toTsConfig, type SearchLanguage } from "./languages";
 import type {
   SearchEngine,
   SearchQuery,
   SearchResult,
+  SearchExplain,
   ProductHit,
   Facet,
   FacetValue,
@@ -43,6 +45,17 @@ const uaLower = (col: Prisma.Sql) =>
 // A single backslash inside the generated SQL: `ESCAPE '\'`. Written as `\\` here
 // because this is a template literal.
 const ESC = Prisma.raw(`ESCAPE '\\'`);
+
+/**
+ * The shop's text-search configuration, as a SQL literal.
+ *
+ * A regconfig cannot be a bind parameter in `websearch_to_tsquery(cfg, …)`, so
+ * this is the one value in the file that is inlined rather than bound.
+ * `toTsConfig` is the reason that is safe: it maps anything not on the allowlist
+ * in ./languages.ts to "simple", so the string reaching `Prisma.raw` is always
+ * one of a fixed set of identifiers we wrote ourselves — never merchant input.
+ */
+const tsConfigSql = (lang: SearchLanguage) => Prisma.raw(`'${toTsConfig(lang)}'`);
 
 /** `col LIKE 'pattern' ESCAPE '\'` — the pattern is built from shopper input,
  *  whose wildcards the caller escapes with `escapeLike`. */
@@ -300,7 +313,7 @@ export class PostgresSearchEngine implements SearchEngine {
     if (availPred) base.push(availPred);
 
     // Merchandising: hidden products removed globally for matching rule.
-    const rule = cfg.matchRule(normalized, q.collection);
+    const rule = cfg.matchRule(normalized, q.collection, q.bucket);
     if (rule && rule.hiddenProductIds.length) {
       base.push(
         Prisma.sql`p."productId" NOT IN (${Prisma.join(rule.hiddenProductIds)})`,
@@ -311,9 +324,16 @@ export class PostgresSearchEngine implements SearchEngine {
     // Pins are prepended to page 1 only, so they may only be excluded from the
     // ORGANIC query on page 1. Excluding them on every page deleted them from
     // the catalog entirely from page 2 onwards.
+    //
+    // `base` is the ORGANIC predicate (page 1 minus the pins, so they are not
+    // listed twice). `baseForCounting` is the whole matching set, pins included,
+    // and it is what the total, the facets and the pin lookup all use. Sharing
+    // one array meant page 1 reported `total - pinned` while page 2 reported
+    // `total` — the page count flickered and the last page came up short — and
+    // the facet counts disagreed between the two in the same way.
     const pinsActive =
       !!rule?.pinnedProductIds.length && q.sort === "relevance" && page === 1;
-    const baseForPins = [...base];
+    const baseForCounting = [...base];
     if (pinsActive) {
       base.push(
         Prisma.sql`p."productId" NOT IN (${Prisma.join(rule!.pinnedProductIds)})`,
@@ -324,6 +344,9 @@ export class PostgresSearchEngine implements SearchEngine {
     let textPred = Prisma.sql`TRUE`;
     let scoreExpr = conditionScoreExpr(rule);
     let strategy: SearchResult["strategy"] = "browse";
+    // Named score components, populated only when there is a term. Used both to
+    // build the total and, when asked, to report the breakdown.
+    let explainParts: Record<string, Prisma.Sql> | null = null;
 
     // Semantic is opt-in per shop, needs Pro, a provider and the pgvector column.
     const wantSemantic =
@@ -334,7 +357,9 @@ export class PostgresSearchEngine implements SearchEngine {
 
     if (hasTerm) {
       strategy = queryVector ? "semantic" : fuzzy ? "hybrid" : "fulltext";
-      const tsq = Prisma.sql`websearch_to_tsquery('simple', ad_immutable_unaccent(${tsQueryStr}))`;
+      // Same configuration the row's `searchVector` was generated with, or a
+      // stemmed query would never match an unstemmed index (and vice versa).
+      const tsq = Prisma.sql`websearch_to_tsquery(${tsConfigSql(cfg.searchLanguage)}, ad_immutable_unaccent(${tsQueryStr}))`;
       const termParam = normalized;
       const esc = escapeLike(termParam);
       const title = uaLower(Prisma.sql`p."title"`);
@@ -385,24 +410,42 @@ export class PostgresSearchEngine implements SearchEngine {
         ? Prisma.sql`similarity(${title}, ${termParam}) * 2.0`
         : Prisma.sql`0::float`;
       const skuBonus = skuMatch
-        ? Prisma.sql`+ (CASE WHEN EXISTS (SELECT 1 FROM unnest(p."skus") s WHERE lower(s) = ${termParam}) THEN 50 ELSE 0 END)`
-        : Prisma.sql``;
+        ? Prisma.sql`(CASE WHEN EXISTS (SELECT 1 FROM unnest(p."skus") s WHERE lower(s) = ${termParam}) THEN 50 ELSE 0 END)`
+        : Prisma.sql`0::float`;
+
+      // Every component is kept as its own expression rather than being inlined
+      // into one sum, so the relevance tester can select them individually and
+      // show a merchant WHY a product ranked where it did. Nothing changes for a
+      // shopper: the same expressions are added up below.
+      explainParts = {
+        textRank: Prisma.sql`ts_rank_cd(p."searchVector", ${tsq}) * 4.0`,
+        similarity: simTerm,
+        semantic: semanticScore,
+        prefix: Prisma.sql`(CASE WHEN ${title} LIKE ${esc + "%"} ${ESC} THEN 1.5 ELSE 0 END)`,
+        popularity: Prisma.sql`ln(1 + p."popularity") * 0.3`,
+        merchandising: Prisma.sql`(${skuBonus} + ${boostExpr})`,
+      };
 
       scoreExpr = Prisma.sql`(
-        ts_rank_cd(p."searchVector", ${tsq}) * 4.0
-        + ${simTerm}
-        + ${semanticScore}
-        + (CASE WHEN ${title} LIKE ${esc + "%"} ${ESC} THEN 1.5 ELSE 0 END)
-        + ln(1 + p."popularity") * 0.3
-        ${skuBonus}
-        + ${boostExpr}
+        ${explainParts.textRank}
+        + ${explainParts.similarity}
+        + ${explainParts.semantic}
+        + ${explainParts.prefix}
+        + ${explainParts.popularity}
+        + ${explainParts.merchandising}
       )`;
     }
 
     // 4. Filter predicates.
     const filterPreds = buildFilterPredicates(q.filters, q.price, q.collection);
-    const whereAll = combine([
+    const whereOrganic = combine([
       ...base,
+      textPred,
+      ...filterPreds.values(),
+    ]);
+    // The full matching set, pins included — what the shopper is told they have.
+    const whereAll = combine([
+      ...baseForCounting,
       textPred,
       ...filterPreds.values(),
     ]);
@@ -412,12 +455,24 @@ export class PostgresSearchEngine implements SearchEngine {
     const offset = (page - 1) * q.perPage;
     const order = orderByClause(q.sort, hasTerm);
 
+    // Only for the admin's relevance tester, and only when there is a term to
+    // break down. One extra column per component, on at most one page of rows.
+    const explainCols =
+      q.explain && explainParts
+        ? Prisma.sql`, ${Prisma.join(
+            Object.entries(explainParts).map(
+              ([name, sql]) => Prisma.sql`(${sql}) AS ${Prisma.raw(`"x_${name}"`)}`,
+            ),
+            ", ",
+          )}`
+        : Prisma.sql``;
+
     const rowsPromise = q.facetsOnly
       ? Promise.resolve([] as any[])
       : prisma.$queryRaw<any[]>(Prisma.sql`
-          SELECT ${HIT_COLUMNS}, ${scoreExpr} AS score
+          SELECT ${HIT_COLUMNS}, ${scoreExpr} AS score${explainCols}
           FROM "Product" p
-          WHERE ${whereAll}
+          WHERE ${whereOrganic}
           ORDER BY ${order}
           LIMIT ${q.perPage} OFFSET ${offset}
         `);
@@ -428,10 +483,13 @@ export class PostgresSearchEngine implements SearchEngine {
 
     // Facet aggregates are the expensive half of a search (one GROUP BY per
     // enabled facet). They depend only on the predicate set, not on the page or
-    // sort, so paging and re-sorting reuse the cached counts.
+    // sort, so paging and re-sorting reuse the cached counts — which is exactly
+    // why they must be computed from the pin-INCLUSIVE predicate. Page 1 and
+    // page 2 otherwise produced different counts under the same cache key,
+    // and whichever ran first won.
     const signature = facetSignature(q, normalized, rule);
     const facetsPromise = this.computeFacets(
-      base,
+      baseForCounting,
       availPred,
       textPred,
       filterPreds,
@@ -453,7 +511,7 @@ export class PostgresSearchEngine implements SearchEngine {
     //    Pinned products must also satisfy the active filters + availability,
     //    and the page is trimmed back to perPage so pins don't overflow it.
     if (pinsActive && !q.facetsOnly) {
-      const pinWhere = combine([...baseForPins, ...filterPreds.values()]);
+      const pinWhere = combine([...baseForCounting, ...filterPreds.values()]);
       hits = await this.applyPins(
         rule!.pinnedProductIds,
         hits,
@@ -474,9 +532,22 @@ export class PostgresSearchEngine implements SearchEngine {
       page,
       perPage: q.perPage,
       facets,
+      presets: cfg.presets,
       suggestion,
       strategy,
       tookMs: Date.now() - started,
+      ...(q.explain
+        ? {
+            explain: buildExplain(
+              normalized,
+              expansions,
+              tsQueryStr,
+              cfg.searchLanguage,
+              rule,
+              rows,
+            ),
+          }
+        : {}),
     };
   }
 
@@ -700,7 +771,7 @@ export class PostgresSearchEngine implements SearchEngine {
     const redirect = cfg.redirects.get(normalized);
 
     const expansions = expandSynonyms(normalized, cfg.synonyms);
-    const tsq = Prisma.sql`websearch_to_tsquery('simple', ad_immutable_unaccent(${toTsQuery(expansions)}))`;
+    const tsq = Prisma.sql`websearch_to_tsquery(${tsConfigSql(cfg.searchLanguage)}, ad_immutable_unaccent(${toTsQuery(expansions)}))`;
     const esc = escapeLike(normalized);
     const title = uaLower(Prisma.sql`p."title"`);
     const collTitle = uaLower(Prisma.sql`"title"`);
@@ -780,6 +851,44 @@ export class PostgresSearchEngine implements SearchEngine {
       pages: pageRows.map((p) => ({ handle: p.handle, title: p.title })),
       ...(redirect ? { redirect } : {}),
     };
+  }
+
+  /**
+   * Search by photo.
+   *
+   * "Find me that jacket" is the one query a keyword index can never answer, and
+   * it is exactly what a shopper does when they have seen something and cannot
+   * name it. With multimodal embeddings the shopper's picture lands in the same
+   * vector space as the product rows, so this is a nearest-neighbour lookup
+   * against the index that already exists — no second service, no second index.
+   *
+   * The plan and provider checks live in the caller; by here the vector is real.
+   */
+  async searchByVector(
+    shopId: string,
+    vector: number[],
+    opts: { limit: number; includeUnavailable?: boolean; collection?: string },
+  ): Promise<ProductHit[]> {
+    const vec = toVectorLiteral(vector);
+    const availPred = opts.includeUnavailable
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`p."available" = TRUE`;
+    const collScope = opts.collection
+      ? Prisma.sql`AND p."collections" && ARRAY[${opts.collection}]::text[]`
+      : Prisma.sql``;
+
+    const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT ${HIT_COLUMNS},
+             (1 - (p."embedding" <=> ${vec}::vector)) AS score
+      FROM "Product" p
+      WHERE p."shopId" = ${shopId} AND p."status" = 'ACTIVE'
+        AND p."publishedOnline" = TRUE AND ${availPred}
+        ${collScope}
+        AND p."embedding" IS NOT NULL
+        AND (p."embedding" <=> ${vec}::vector) < ${SEMANTIC_MAX_DISTANCE}
+      ORDER BY p."embedding" <=> ${vec}::vector
+      LIMIT ${Math.min(Math.max(1, opts.limit), 48)}`);
+    return rows.map((r) => rowToHit(r));
   }
 
   /** Empty-query recommendations shown when the search box is focused but blank. */
@@ -891,6 +1000,51 @@ export class PostgresSearchEngine implements SearchEngine {
       return rows.filter((r) => Number(r.score) > 0).map((r) => rowToHit(r));
     }
 
+    // Personalised: "more like the things you have been looking at".
+    //
+    // The shopper's recently-viewed ids come up from localStorage on the
+    // request; nothing is stored server-side, so this needs no customer account,
+    // builds no profile, and survives a shopper clearing their browser. Products
+    // already seen are excluded — recommending what someone just looked at is
+    // the classic way these rails waste their slots.
+    if (q.kind === "personalized") {
+      const seen = (q.seenProductIds ?? []).filter(Boolean).slice(0, 20);
+      if (!seen.length) {
+        return this.recommend({ ...q, kind: "bestsellers" });
+      }
+      const anchors = await prisma.$queryRaw<any[]>(Prisma.sql`
+        SELECT p."productType", p."vendor", p."tags", p."collections"
+        FROM "Product" p
+        WHERE p."shopId" = ${q.shopId} AND p."productId" IN (${Prisma.join(seen)})
+        LIMIT 20`);
+      if (!anchors.length) return this.recommend({ ...q, kind: "bestsellers" });
+
+      // Union the attributes of everything seen, then score candidates by how
+      // much they overlap. Weighted the same way "related" is, so the two rails
+      // agree about what "similar" means.
+      const types = [...new Set(anchors.map((a) => a.productType).filter(Boolean))];
+      const vendors = [...new Set(anchors.map((a) => a.vendor).filter(Boolean))];
+      const tags = [...new Set(anchors.flatMap((a) => a.tags ?? []))].slice(0, 60);
+      const colls = [...new Set(anchors.flatMap((a) => a.collections ?? []))].slice(0, 60);
+
+      const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
+        SELECT ${HIT_COLUMNS},
+               ( (CASE WHEN p."collections" && ${colls}::text[] THEN 3 ELSE 0 END)
+               + (CASE WHEN p."productType" = ANY(${types}::text[]) THEN 2 ELSE 0 END)
+               + (CASE WHEN p."vendor" = ANY(${vendors}::text[]) THEN 1 ELSE 0 END)
+               + (CASE WHEN p."tags" && ${tags}::text[] THEN 1 ELSE 0 END)
+               )::float AS score
+        FROM "Product" p
+        WHERE ${base} ${collScope}
+          AND p."productId" NOT IN (${Prisma.join(seen)})
+        ORDER BY score DESC, p."popularity" DESC, p."id" ASC
+        LIMIT ${limit}`);
+      const scored = rows.filter((r) => Number(r.score) > 0);
+      // A shopper whose history overlaps nothing in stock still deserves a rail.
+      if (!scored.length) return this.recommend({ ...q, kind: "bestsellers" });
+      return scored.map((r) => rowToHit(r));
+    }
+
     if (q.kind === "trending") {
       // What shoppers actually clicked out of search in the last week.
       const rows = await prisma.$queryRaw<any[]>(Prisma.sql`
@@ -943,19 +1097,60 @@ function facetSignature(
     .sort()
     .join("&");
   const price = q.price ? `${q.price.min ?? ""}-${q.price.max ?? ""}` : "";
-  const ruleKey = rule
-    ? `${rule.triggerQuery ?? ""}/${rule.triggerCollection ?? ""}/${rule.priority}`
-    : "";
+  // The rule id, not its triggers: two rules can share a trigger and priority
+  // while hiding completely different products.
+  const ruleKey = rule ? rule.id : "";
   return [
     q.shopId,
     normalized,
     q.collection ?? "",
     q.includeUnavailable ? "1" : "0",
     q.typoTolerance === false ? "0" : "1",
+    // Semantic search adds a clause to the text predicate the facets are
+    // computed over, so a shop that has it on must not share counts with the
+    // same query served while the embeddings provider was unreachable.
+    q.semantic === false ? "0" : "1",
     filters,
     price,
     ruleKey,
   ].join(":");
+}
+
+/**
+ * Assemble the score breakdown for the admin's relevance tester.
+ *
+ * Reads the `x_*` columns the explain select added. Absent (no term, or explain
+ * not requested) they simply come back as zeroes, which is the honest answer for
+ * a browse query: nothing was ranked, the catalog was ordered.
+ */
+function buildExplain(
+  normalized: string,
+  expansions: string[],
+  tsQueryStr: string,
+  language: string,
+  rule: MerchRule | null,
+  rows: any[],
+): SearchExplain {
+  const scores: SearchExplain["scores"] = {};
+  for (const r of rows) {
+    const parts = {
+      textRank: Number(r.x_textRank ?? 0),
+      similarity: Number(r.x_similarity ?? 0),
+      semantic: Number(r.x_semantic ?? 0),
+      prefix: Number(r.x_prefix ?? 0),
+      popularity: Number(r.x_popularity ?? 0),
+      merchandising: Number(r.x_merchandising ?? 0),
+    };
+    scores[r.productId] = { total: Number(r.score ?? 0), ...parts };
+  }
+  return {
+    normalizedTerm: normalized,
+    expansions,
+    tsQuery: tsQueryStr,
+    language,
+    rule: rule ? { id: rule.id, name: rule.name, priority: rule.priority } : null,
+    scores,
+  };
 }
 
 /** Dice coefficient over character trigrams — mirrors pg_trgm's similarity()

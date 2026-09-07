@@ -462,3 +462,189 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+/* ============================================================
+   v3: dark mode, quick-filter chips, facet search / show-more,
+   voice search, theme-grid drawer parity.
+   ============================================================ */
+
+/* ---- Dark mode ----
+   The merchant can set every colour in the app, and those values win — they are
+   applied as CSS variables on :root by the script. This block only supplies
+   DEFAULTS, so a dark storefront that never opened the colour settings stops
+   getting a white panel punched through the middle of it. Anything the merchant
+   has actually chosen overrides these, because a variable set on :root beats the
+   fallback inside var(). */
+@media (prefers-color-scheme: dark) {
+  .adsf-dropdown,
+  .adsf-fdd__pop,
+  .adsf-app--filters-drawer .adsf-facets,
+  .adsf-searchbar__form {
+    background: var(--adsf-dd-bg, #16181c);
+    color: var(--adsf-dd-text, #e8e8ea);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  .adsf-dropdown { box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55); }
+  .adsf-dropdown__section + .adsf-dropdown__section,
+  .adsf-dropdown__all { border-top-color: rgba(255, 255, 255, 0.1); }
+  .adsf-dropdown__product.is-preview,
+  .adsf-dropdown [role="option"].is-active { background: rgba(255, 255, 255, 0.07); }
+  .adsf-dropdown__preview { border-color: rgba(255, 255, 255, 0.12); }
+  .adsf-card__img,
+  .adsf-card__noimg,
+  .adsf-dropdown__noimg,
+  .adsf-rec__card img,
+  .adsf-skel { background: rgba(255, 255, 255, 0.08); }
+  .adsf-preview__desc { color: rgba(232, 232, 234, 0.65); }
+  /* The facet drawer covers the page on a phone; on a dark storefront a white
+     sheet sliding in is the most jarring thing the app can do. */
+  @media (max-width: 749px) {
+    .adsf-facets { background: var(--adsf-dd-bg, #16181c); }
+  }
+}
+
+/* ---- Quick-filter chips (merchant-defined presets) ---- */
+.adsf-chip--preset {
+  border-radius: var(--adsf-filter-radius, 999px);
+  background: var(--adsf-filter-bg, transparent);
+  color: var(--adsf-filter-text, inherit);
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+.adsf-chip--preset:hover {
+  background: var(--adsf-filter-hover-bg, color-mix(in srgb, currentColor 8%, transparent));
+}
+
+/* ---- Facet search + show more ----
+   A facet capped at 50 values used to render all 50, open. Six of those is a
+   sidebar nobody scrolls to the bottom of. */
+.adsf-facet__values { display: block; }
+.adsf-facet__find {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.55rem;
+  font: inherit;
+  font-size: 0.9em;
+  color: inherit;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 6px;
+}
+.adsf-facet__more {
+  margin-top: 0.35rem;
+  padding: 0.25rem 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.88em;
+  color: var(--adsf-accent, inherit);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.adsf-facet__more:focus-visible {
+  outline: 2px solid var(--adsf-accent, #111);
+  outline-offset: 2px;
+}
+
+/* ---- Voice search ----
+   Only rendered when the browser actually supports the Web Speech API, so this
+   never styles a button that does nothing. */
+.adsf-voice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  align-self: stretch;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.adsf-voice:hover { opacity: 1; }
+.adsf-voice:focus-visible {
+  outline: 2px solid var(--adsf-accent, #111);
+  outline-offset: -2px;
+}
+.adsf-voice.is-listening {
+  color: var(--adsf-accent, #111);
+  opacity: 1;
+  animation: adsf-pulse 1.2s ease-in-out infinite;
+}
+@keyframes adsf-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .adsf-voice.is-listening { animation: none; }
+}
+
+/* ---- Theme-grid drawer ----
+   The filters over a theme's own grid open as a drawer on a phone, the same as
+   the app's own grid does, so they need the same backdrop and sheet. */
+.adsf-themegrid .adsf-drawer-backdrop { z-index: 1100; }
+@media (max-width: 749px) {
+  .adsf-themegrid .adsf-facets {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 82%; max-width: 340px; z-index: 1200;
+    background: #fff; transform: translateX(-100%);
+    transition: transform .25s ease; overflow-y: auto; padding: 1.25rem;
+    box-shadow: 2px 0 24px rgba(0, 0, 0, .2);
+  }
+  .adsf-themegrid .adsf-facets.is-open { transform: translateX(0); }
+  .adsf-themegrid .adsf-facets__inner { flex-direction: column; }
+  .adsf-themegrid .adsf-fdd__pop { position: static; box-shadow: none; border: 0; padding: 0.25rem 0; }
+}
+@media (max-width: 749px) and (prefers-reduced-motion: reduce) {
+  .adsf-themegrid .adsf-facets { transition: none; }
+}
+
+/* The floating variant sits OVER the theme's own search input rather than
+   inside its markup — injecting a button into a theme header is how you break
+   someone's layout. Positioned from the input's rect by the script. */
+.adsf-voice--floating {
+  position: fixed;
+  z-index: 100002;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+/* ---- Search by photo ----
+   Rendered only after the server confirms the shop can serve it, so this never
+   styles a button that does nothing. */
+.adsf-camera {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  align-self: stretch;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.adsf-camera:hover { opacity: 1; }
+.adsf-camera:focus-visible {
+  outline: 2px solid var(--adsf-accent, #111);
+  outline-offset: -2px;
+}
+.adsf-camera--floating {
+  position: fixed;
+  z-index: 100002;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+.adsf-camera.is-busy {
+  opacity: 1;
+  color: var(--adsf-accent, #111);
+  animation: adsf-pulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .adsf-camera.is-busy { animation: none; }
+}

@@ -25,17 +25,30 @@ const MAX_FILTER_VALUES = 30;
 const MAX_FILTER_SOURCES = 20;
 
 /**
+ * The default storefront path of the App Proxy.
+ *
+ * ONE source of truth, shared by the storefront links and the admin's own
+ * "view this page" links. The dashboard previously hardcoded its own copy of
+ * this string, so changing `[app_proxy] prefix/subpath` in shopify.app.toml
+ * silently turned two admin links into 404s. Override with APP_PROXY_BASE if
+ * that block ever changes; it must match `{prefix}/{subpath}`.
+ */
+export const DEFAULT_PROXY_BASE =
+  process.env.APP_PROXY_BASE?.trim() || "/apps/anotherdev-search";
+
+/**
  * The storefront-facing base path of the App Proxy (e.g. `/apps/anotherdev-search`).
  *
  * Shopify forwards proxy requests to `{app_url}/proxy/...`, so `request.url` is
  * the APP's path, not the shopper's. Any link we render into the storefront must
  * use the shopper's path or it 404s. Shopify passes it as `path_prefix` on every
- * proxy request; the literal is only a fallback for local/manual calls.
+ * proxy request; the constant is only a fallback for local/manual calls and for
+ * the admin, which has no proxy request to read it from.
  */
 export function proxyBase(sp: URLSearchParams): string {
   const prefix = sp.get("path_prefix");
   if (prefix && prefix.startsWith("/") && !prefix.includes("//")) return prefix;
-  return "/apps/anotherdev-search";
+  return DEFAULT_PROXY_BASE;
 }
 
 /**
@@ -174,4 +187,27 @@ export function clientKey(request: Request, shopDomain: string): string {
     request.headers.get("cf-connecting-ip") ||
     "";
   return `${shopDomain}:${fwd || "unknown"}`;
+}
+
+/**
+ * Which arm of a merchandising experiment this shopper is in.
+ *
+ * Derived from the anonymous session token the widget already sends, so the
+ * assignment is stable for the life of that token — a shopper must not see rule
+ * set A on the results page and B after clicking a facet, or the comparison in
+ * Analytics is measuring noise. No extra cookie, no extra storage, and a shopper
+ * with no token simply gets the unbucketed ("all") rules.
+ *
+ * FNV-1a: not cryptographic, and does not need to be. It only has to spread
+ * evenly, which a plain character sum does not.
+ */
+export function bucketFor(sessionToken: string | null | undefined): string | undefined {
+  const t = String(sessionToken ?? "").trim();
+  if (!t) return undefined;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) {
+    hash ^= t.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % 2 === 0 ? "a" : "b";
 }

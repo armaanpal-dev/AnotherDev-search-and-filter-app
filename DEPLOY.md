@@ -74,21 +74,66 @@ extension — those still go through `shopify app deploy`.)
 
 ## After a schema change
 
-The release command runs `prisma migrate deploy`, but it does NOT rebuild the raw
-SQL layer (the generated tsvector column, trigram/GIN indexes, pgvector column) —
-Prisma cannot model those. Run it once after deploying a migration that touches
-indexed columns:
-```bash
-fly ssh console -C "npm run db:index"
+The release command now runs BOTH halves:
+
+```
+release_command = "sh -c 'npx prisma migrate deploy && npm run db:index'"
 ```
 
+`db:index` is not optional. The generated tsvector column, the trigram/GIN
+indexes and the pgvector column live in `prisma/sql/search_index.sql`, which
+Prisma cannot model and therefore does not apply — so a deploy to a fresh
+database with only `migrate deploy` left `Product."searchVector"` missing and
+every storefront search returned a 500. The script is idempotent and only
+rebuilds the generated column when its definition is actually stale, so running
+it on every deploy is cheap.
+
+If your host has no release hook, use `npm run docker-start` as the container
+command instead; it runs `setup` (migrate + index) before starting the server.
+
+## Scheduled catalog reconciliation
+
+Webhooks keep the index close to live, but they are not a guarantee — a delivery
+can be dropped, a bulk API edit can be throttled, and `collections/update` on a
+very large collection deliberately defers its removals. A nightly pass closes
+that gap. Set `CRON_SECRET`, then have any scheduler call it once a day:
+
+```bash
+curl -X POST https://<app>/cron/sync -H "Authorization: Bearer $CRON_SECRET"
+```
+
+With `CRON_SECRET` unset the endpoint refuses every request — an unset variable
+in production must never mean "open to anyone". Merchants can opt out per shop
+from Settings.
+
+## Purchase attribution (Web Pixel)
+
+`extensions/anotherdev-pixel` reports completed orders back to the search that
+produced them. Two things are required and neither is automatic:
+
+1. **New scopes.** `write_pixels` and `read_customer_events` were added to
+   `shopify.app.toml` and `.env`/`SCOPES`. Existing merchants WILL be prompted to
+   re-approve the app on their next visit. Deploy the app config
+   (`shopify app deploy`) before the server, or the grant will not exist yet.
+2. **Per-shop activation.** Shopify only runs the pixel once the app has created
+   a WebPixel record for that shop. Merchants turn it on from Settings →
+   Revenue tracking; nothing is installed on a store that has not asked for it.
+
+The pixel reads the order total, its line-item product ids, and the anonymous
+`adsf_st` cookie the search widget sets. It reads no customer identifiers.
+
 ## Notes
-- **Scopes are unchanged and read-only**, so existing merchants are not prompted
-  to re-approve the app after this deploy.
-- **Analytics stops at add-to-cart.** Checkout runs on Shopify's domain, so
-  measuring completed orders would need a Web Pixel extension and the
-  `read_customer_events` + `write_pixels` scopes — deliberately not part of this
-  app. Click-through and add-to-cart are both attributed to the exact search.
+- **Scopes changed in this release.** `write_pixels` and `read_customer_events`
+  were added for purchase attribution, so existing merchants ARE prompted to
+  re-approve on their next admin visit. Everything touching the catalog stays
+  read-only.
+- **Analytics now reaches revenue.** Click-through and add-to-cart come from the
+  storefront widget; completed orders come from the Web Pixel, which is the only
+  surface Shopify runs inside checkout. Shops that have not switched the pixel on
+  see the funnel stop at add-to-cart, as before.
+- **Sync streams.** The bulk export is read line by line rather than buffered
+  into one string, so a large catalog no longer has to fit in the machine's
+  memory alongside its own parse.
 - **Sync runs in the web process.** It is guarded against concurrent runs and
   recovers from a crash mid-run (a heartbeat marks a stale run dead after 3
   minutes), but a deploy during a sync interrupts it — re-run it from the Index

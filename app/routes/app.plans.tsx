@@ -114,10 +114,14 @@ const FEATURES: { label: string; on: (k: PlanKey) => boolean | string }[] = [
   { label: "Instant search and filters", on: () => true },
   { label: "Typo tolerance and synonyms", on: () => true },
   { label: "SKU and variant search", on: () => true },
+  { label: "Voice search", on: () => true },
   { label: "Recommendation rails", on: () => true },
   { label: "Crawlable results page", on: () => true },
+  { label: "Revenue attribution", on: () => true },
+  { label: "Relevance tester", on: () => true },
   { label: "Analytics history", on: (k) => `${PLAN_LIMITS[k].analyticsDays} days` },
   { label: "Merchandising rules", on: (k) => PLAN_LIMITS[k].merchandising },
+  { label: "Rule scheduling and A/B tests", on: (k) => PLAN_LIMITS[k].merchandising },
   { label: "Search redirects", on: (k) => PLAN_LIMITS[k].redirects },
   { label: "AI product feed", on: (k) => PLAN_LIMITS[k].aiFeed },
 ];
@@ -132,8 +136,15 @@ export default function PlansPage() {
   const current = PLAN_LIMITS[plan];
   const overLimit = productCount > current.productLimit;
 
+  // Only advertise what this deployment can actually run. A pricing table
+  // listing a capability the server has no provider for is a promise the app
+  // cannot keep.
   const features = semantic
-    ? [...FEATURES, { label: "Semantic search", on: (k: PlanKey) => PLAN_LIMITS[k].semantic }]
+    ? [
+        ...FEATURES,
+        { label: "Semantic search", on: (k: PlanKey) => PLAN_LIMITS[k].semantic },
+        { label: "Search by photo", on: (k: PlanKey) => PLAN_LIMITS[k].semantic },
+      ]
     : FEATURES;
 
   return (

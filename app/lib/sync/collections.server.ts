@@ -200,6 +200,9 @@ export async function reconcileCollectionMembership(
   const maxProducts = opts.maxProducts ?? 5000;
   const memberIds: string[] = [];
   let cursor: string | null = null;
+  // Whether the walk stopped because the collection ran out, or because WE did.
+  // The difference decides whether the removal pass below is safe to run.
+  let complete = true;
 
   do {
     const res = await admin.graphql(
@@ -217,29 +220,58 @@ export async function reconcileCollectionMembership(
     );
     const json = await res.json();
     const conn = json.data?.collection?.products;
-    if (!conn) break;
+    if (!conn) {
+      // No data back at all — we know nothing about membership, so we must not
+      // act on the empty list we are holding.
+      complete = false;
+      break;
+    }
     for (const edge of conn.edges ?? []) memberIds.push(gidId(edge.node.id));
-    cursor =
-      conn.pageInfo?.hasNextPage && memberIds.length < maxProducts
-        ? conn.pageInfo.endCursor
-        : null;
+    if (conn.pageInfo?.hasNextPage) {
+      if (memberIds.length >= maxProducts) {
+        complete = false;
+        cursor = null;
+      } else {
+        cursor = conn.pageInfo.endCursor;
+      }
+    } else {
+      cursor = null;
+    }
   } while (cursor);
 
-  // Two set operations rather than a read-modify-write per product: add the
-  // handle where it is missing, remove it where it no longer belongs.
-  await prisma.$executeRaw`
-    UPDATE "Product"
-    SET "collections" = array_append("collections", ${handle})
-    WHERE "shopId" = ${shopId}
-      AND "productId" = ANY(${memberIds}::text[])
-      AND NOT (${handle} = ANY("collections"))`;
+  // Add the handle wherever it is missing. Always safe: every id here was
+  // confirmed to be a member, whether or not we saw the whole collection.
+  if (memberIds.length) {
+    await prisma.$executeRaw`
+      UPDATE "Product"
+      SET "collections" = array_append("collections", ${handle})
+      WHERE "shopId" = ${shopId}
+        AND "productId" = ANY(${memberIds}::text[])
+        AND NOT (${handle} = ANY("collections"))`;
+  }
 
-  await prisma.$executeRaw`
-    UPDATE "Product"
-    SET "collections" = array_remove("collections", ${handle})
-    WHERE "shopId" = ${shopId}
-      AND ${handle} = ANY("collections")
-      AND NOT ("productId" = ANY(${memberIds}::text[]))`;
+  // Remove it where it no longer belongs — but ONLY when the walk saw the whole
+  // collection.
+  //
+  // A partial walk means "not in memberIds" is indistinguishable from "past the
+  // page we stopped at", so this statement used to strip the handle from every
+  // product beyond the cap. Any collection over `maxProducts` lost most of its
+  // membership on every collections/update webhook, and collection-scoped search
+  // and the collection facet were wrong until the next full sync. A skipped
+  // removal is the recoverable failure: the next full sync reconciles it.
+  if (complete) {
+    await prisma.$executeRaw`
+      UPDATE "Product"
+      SET "collections" = array_remove("collections", ${handle})
+      WHERE "shopId" = ${shopId}
+        AND ${handle} = ANY("collections")
+        AND NOT ("productId" = ANY(${memberIds}::text[]))`;
+  } else {
+    console.warn(
+      `[collections] ${handle}: walked ${memberIds.length} products without ` +
+        `reaching the end — additions applied, removals deferred to the next full sync.`,
+    );
+  }
 
   return memberIds.length;
 }

@@ -24,8 +24,17 @@ export type { NormalizedProduct } from "./normalize-product";
  * dropping the product out of every collection-scoped search and collection
  * facet until the next full catalog sync. Only a full sync knows these values,
  * so only a full sync is allowed to write them.
+ *
+ * `tsConfig` joins them for the same reason: a webhook has no idea what the
+ * shop's stemming language is, and writing the default over it would silently
+ * revert one product to unstemmed matching.
  */
-const FULL_SYNC_ONLY = ["collections", "metafields", "currencyCode"] as const;
+const FULL_SYNC_ONLY = [
+  "collections",
+  "metafields",
+  "currencyCode",
+  "tsConfig",
+] as const;
 
 export type WriteSource = "bulk" | "webhook";
 
@@ -49,6 +58,7 @@ function productData(p: NormalizedProduct) {
     options: p.options,
     collections: p.collections,
     metafields: p.metafields,
+    tsConfig: p.tsConfig ?? "simple",
     variantText,
     skus,
     publishedAt: p.publishedAt,
