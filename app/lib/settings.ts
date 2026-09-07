@@ -50,6 +50,36 @@ export interface WidgetSettings {
    *   app    always our grid, so every facet works regardless of the theme
    */
   productCards: "auto" | "theme" | "app";
+
+  /* ---- Product card appearance -------------------------------------------
+   * Only reaches the page when this app draws the cards (productCards "app",
+   * or "auto" falling back to our grid). Under "theme" none of it applies,
+   * because the cards are not ours to style.
+   *
+   * Cards deliberately inherit the storefront font family, so these settings
+   * cover the things inheritance cannot give us: proportions, chrome, and the
+   * two text roles a product card actually has. */
+  cardRatio: "square" | "portrait" | "landscape" | "wide" | "natural";
+  cardImageFit: "cover" | "contain";
+  cardRadius: number;           // px, corners on image and card
+  cardBorder: "none" | "line" | "shadow";
+  cardBg: string;
+  cardPadding: number;          // px of inset when the card has chrome
+  cardGap: number;              // px between cards in the grid
+  cardAlign: "left" | "center";
+  cardHover: "none" | "zoom" | "lift";
+  cardTitleSize: number;
+  cardTitleWeight: string;
+  cardTitleColor: string;
+  cardTitleLines: number;       // clamp, so rows stay aligned
+  cardPriceSize: number;
+  cardPriceWeight: string;
+  cardPriceColor: string;
+  cardButtonLabel: string;
+  cardButtonBg: string;
+  cardButtonText: string;
+  cardButtonRadius: number;
+  cardButtonFullWidth: boolean;
   // How the facet UI is presented on results and collection pages.
   //   sidebar  column beside the grid, drawer on mobile (default)
   //   topbar   one horizontal row above the grid
@@ -96,6 +126,27 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   maxSuggestions: 8,
   collectionFilters: true,
   productCards: "auto",
+  cardRatio: "square",
+  cardImageFit: "cover",
+  cardRadius: 8,
+  cardBorder: "none",
+  cardBg: "transparent",
+  cardPadding: 0,
+  cardGap: 20,
+  cardAlign: "left",
+  cardHover: "none",
+  cardTitleSize: 14,
+  cardTitleWeight: "500",
+  cardTitleColor: "#1a1a1a",
+  cardTitleLines: 2,
+  cardPriceSize: 14,
+  cardPriceWeight: "600",
+  cardPriceColor: "#1a1a1a",
+  cardButtonLabel: "Add to cart",
+  cardButtonBg: "#111111",
+  cardButtonText: "#ffffff",
+  cardButtonRadius: 8,
+  cardButtonFullWidth: true,
   filterLayout: "sidebar",
   filterButtonShape: "pill",
   filterButtonBg: "transparent",
@@ -136,6 +187,27 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     maxSuggestions: num(s.maxSuggestions, DEFAULT_SETTINGS.maxSuggestions, 3, 12),
     collectionFilters: bool(s.collectionFilters, DEFAULT_SETTINGS.collectionFilters),
     productCards: oneOf(s.productCards, ["auto", "theme", "app"], DEFAULT_SETTINGS.productCards),
+    cardRatio: oneOf(s.cardRatio, ["square", "portrait", "landscape", "wide", "natural"], DEFAULT_SETTINGS.cardRatio),
+    cardImageFit: oneOf(s.cardImageFit, ["cover", "contain"], DEFAULT_SETTINGS.cardImageFit),
+    cardRadius: num(s.cardRadius, DEFAULT_SETTINGS.cardRadius, 0, 32),
+    cardBorder: oneOf(s.cardBorder, ["none", "line", "shadow"], DEFAULT_SETTINGS.cardBorder),
+    cardBg: color(s.cardBg, DEFAULT_SETTINGS.cardBg),
+    cardPadding: num(s.cardPadding, DEFAULT_SETTINGS.cardPadding, 0, 24),
+    cardGap: num(s.cardGap, DEFAULT_SETTINGS.cardGap, 4, 48),
+    cardAlign: oneOf(s.cardAlign, ["left", "center"], DEFAULT_SETTINGS.cardAlign),
+    cardHover: oneOf(s.cardHover, ["none", "zoom", "lift"], DEFAULT_SETTINGS.cardHover),
+    cardTitleSize: num(s.cardTitleSize, DEFAULT_SETTINGS.cardTitleSize, 11, 24),
+    cardTitleWeight: oneOf(String(s.cardTitleWeight), WEIGHTS, DEFAULT_SETTINGS.cardTitleWeight),
+    cardTitleColor: color(s.cardTitleColor, DEFAULT_SETTINGS.cardTitleColor),
+    cardTitleLines: num(s.cardTitleLines, DEFAULT_SETTINGS.cardTitleLines, 1, 4),
+    cardPriceSize: num(s.cardPriceSize, DEFAULT_SETTINGS.cardPriceSize, 11, 24),
+    cardPriceWeight: oneOf(String(s.cardPriceWeight), WEIGHTS, DEFAULT_SETTINGS.cardPriceWeight),
+    cardPriceColor: color(s.cardPriceColor, DEFAULT_SETTINGS.cardPriceColor),
+    cardButtonLabel: label(s.cardButtonLabel, DEFAULT_SETTINGS.cardButtonLabel),
+    cardButtonBg: color(s.cardButtonBg, DEFAULT_SETTINGS.cardButtonBg),
+    cardButtonText: color(s.cardButtonText, DEFAULT_SETTINGS.cardButtonText),
+    cardButtonRadius: num(s.cardButtonRadius, DEFAULT_SETTINGS.cardButtonRadius, 0, 32),
+    cardButtonFullWidth: bool(s.cardButtonFullWidth, DEFAULT_SETTINGS.cardButtonFullWidth),
     filterButtonShape: oneOf(s.filterButtonShape, ["pill", "rounded", "square"], DEFAULT_SETTINGS.filterButtonShape),
     filterButtonBg: color(s.filterButtonBg, DEFAULT_SETTINGS.filterButtonBg),
     filterButtonText: color(s.filterButtonText, DEFAULT_SETTINGS.filterButtonText),
@@ -159,7 +231,7 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     textColor: color(s.textColor, DEFAULT_SETTINGS.textColor),
     highlightColor: color(s.highlightColor, DEFAULT_SETTINGS.highlightColor),
     fontSize: num(s.fontSize, DEFAULT_SETTINGS.fontSize, 12, 22),
-    fontWeight: oneOf(String(s.fontWeight), ["300", "400", "500", "600", "700"], DEFAULT_SETTINGS.fontWeight),
+    fontWeight: oneOf(String(s.fontWeight), WEIGHTS, DEFAULT_SETTINGS.fontWeight),
     swatches: swatchMap(s.swatches),
   };
 }
@@ -184,6 +256,8 @@ export function mergeSettings(
   return resolveSettings({ ...current, ...defined });
 }
 
+export const WEIGHTS = ["300", "400", "500", "600", "700"] as const;
+
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 const num = (v: unknown, d: number, min: number, max: number) => {
   const n = typeof v === "number" ? v : parseInt(String(v), 10);
@@ -202,6 +276,17 @@ const COLOR_RE =
 const color = (v: unknown, d: string) => {
   const s = typeof v === "string" ? v.trim() : "";
   return s && COLOR_RE.test(s) ? s : d;
+};
+
+/**
+ * A short piece of merchant text that ends up as the label on a storefront
+ * button. Angle brackets are stripped and the length is bounded before it ever
+ * reaches the page, so a label can never carry markup into the DOM even if the
+ * render path forgets to escape it.
+ */
+const label = (v: unknown, d: string) => {
+  const t = typeof v === "string" ? v.replace(/[<>]/g, "").trim().slice(0, 24) : "";
+  return t || d;
 };
 
 /** Merchant-defined swatches: option value -> colour or image URL. */

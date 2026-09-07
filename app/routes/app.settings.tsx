@@ -6,7 +6,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
-import { resolveSettings, mergeSettings, type WidgetSettings } from "../lib/settings";
+import { resolveSettings, mergeSettings, WEIGHTS, type WidgetSettings } from "../lib/settings";
 import { getPlanStatus } from "../lib/billing.server";
 import { semanticReady } from "../lib/search/embeddings.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
@@ -88,6 +88,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     fontSize: numeric("fontSize"),
     filterLayout: field("filterLayout"),
     productCards: field("productCards"),
+    cardRatio: field("cardRatio"),
+    cardImageFit: field("cardImageFit"),
+    cardRadius: numeric("cardRadius"),
+    cardBorder: field("cardBorder"),
+    cardBg: field("cardBg"),
+    cardPadding: numeric("cardPadding"),
+    cardGap: numeric("cardGap"),
+    cardAlign: field("cardAlign"),
+    cardHover: field("cardHover"),
+    cardTitleSize: numeric("cardTitleSize"),
+    cardTitleWeight: field("cardTitleWeight"),
+    cardTitleColor: field("cardTitleColor"),
+    cardTitleLines: numeric("cardTitleLines"),
+    cardPriceSize: numeric("cardPriceSize"),
+    cardPriceWeight: field("cardPriceWeight"),
+    cardPriceColor: field("cardPriceColor"),
+    cardButtonLabel: field("cardButtonLabel"),
+    cardButtonBg: field("cardButtonBg"),
+    cardButtonText: field("cardButtonText"),
+    cardButtonRadius: numeric("cardButtonRadius"),
+    cardButtonFullWidth: checkbox("cardButtonFullWidth"),
     filterButtonShape: field("filterButtonShape"),
     filterButtonBg: field("filterButtonBg"),
     filterButtonText: field("filterButtonText"),
@@ -343,6 +364,100 @@ export default function SettingsPage() {
             )}
           </s-stack>
         </s-section>
+
+        {s.productCards !== "theme" && (
+          <s-section heading="Product card appearance">
+            <s-stack direction="block" gap="base">
+              <s-text color="subdued">
+                These apply to the cards this app draws. Font family always comes
+                from your theme, so cards keep your storefront’s typeface.
+              </s-text>
+
+              <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                <s-select name="cardRatio" label="Image shape" value={s.cardRatio}>
+                  <s-option value="square">Square (1:1)</s-option>
+                  <s-option value="portrait">Portrait (3:4)</s-option>
+                  <s-option value="landscape">Landscape (4:3)</s-option>
+                  <s-option value="wide">Wide (16:9)</s-option>
+                  <s-option value="natural">Natural, uncropped</s-option>
+                </s-select>
+                <s-select name="cardImageFit" label="Image fill" value={s.cardImageFit}>
+                  <s-option value="cover">Crop to fill the shape</s-option>
+                  <s-option value="contain">Fit the whole image in</s-option>
+                </s-select>
+              </s-grid>
+
+              <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                <s-select name="cardBorder" label="Card outline" value={s.cardBorder}>
+                  <s-option value="none">None, straight on the page</s-option>
+                  <s-option value="line">Thin border</s-option>
+                  <s-option value="shadow">Soft shadow</s-option>
+                </s-select>
+                <s-select name="cardHover" label="Hover effect" value={s.cardHover}>
+                  <s-option value="none">None</s-option>
+                  <s-option value="zoom">Zoom the image</s-option>
+                  <s-option value="lift">Lift the card</s-option>
+                </s-select>
+              </s-grid>
+
+              <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                <ColorField name="cardBg" label="Card background" value={s.cardBg} />
+                <s-select name="cardAlign" label="Text alignment" value={s.cardAlign}>
+                  <s-option value="left">Left</s-option>
+                  <s-option value="center">Centred</s-option>
+                </s-select>
+              </s-grid>
+
+              <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="base">
+                <s-number-field name="cardRadius" label="Corner radius (px)" min={0} max={32} defaultValue={String(s.cardRadius)} />
+                <s-number-field name="cardPadding" label="Inner padding (px)" min={0} max={24} defaultValue={String(s.cardPadding)} />
+                <s-number-field name="cardGap" label="Space between cards (px)" min={4} max={48} defaultValue={String(s.cardGap)} />
+              </s-grid>
+
+              <s-divider />
+              <s-text type="strong">Product title</s-text>
+              <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                <s-number-field name="cardTitleSize" label="Size (px)" min={11} max={24} defaultValue={String(s.cardTitleSize)} />
+                <s-select name="cardTitleWeight" label="Weight" value={s.cardTitleWeight}>
+                  {WEIGHTS.map((w) => (
+                    <s-option key={w} value={w}>{w}</s-option>
+                  ))}
+                </s-select>
+              </s-grid>
+              <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                <ColorField name="cardTitleColor" label="Colour" value={s.cardTitleColor} />
+                <s-number-field name="cardTitleLines" label="Maximum lines" min={1} max={4} defaultValue={String(s.cardTitleLines)} />
+              </s-grid>
+
+              <s-divider />
+              <s-text type="strong">Price</s-text>
+              <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="base">
+                <s-number-field name="cardPriceSize" label="Size (px)" min={11} max={24} defaultValue={String(s.cardPriceSize)} />
+                <s-select name="cardPriceWeight" label="Weight" value={s.cardPriceWeight}>
+                  {WEIGHTS.map((w) => (
+                    <s-option key={w} value={w}>{w}</s-option>
+                  ))}
+                </s-select>
+                <ColorField name="cardPriceColor" label="Colour" value={s.cardPriceColor} />
+              </s-grid>
+
+              <s-divider />
+              <s-text type="strong">Add to cart button</s-text>
+              <s-text color="subdued">
+                Only drawn when “Add to cart directly from results” is on, above.
+              </s-text>
+              <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                <s-text-field name="cardButtonLabel" label="Button text" maxLength={24} defaultValue={s.cardButtonLabel} />
+                <s-number-field name="cardButtonRadius" label="Corner radius (px)" min={0} max={32} defaultValue={String(s.cardButtonRadius)} />
+              </s-grid>
+              <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                <ColorField name="cardButtonBg" label="Background" value={s.cardButtonBg} />
+                <ColorField name="cardButtonText" label="Text colour" value={s.cardButtonText} />
+              </s-grid>
+              <Check name="cardButtonFullWidth" checked={s.cardButtonFullWidth} label="Stretch the button to the full card width" />
+            </s-stack>
+          </s-section>
+        )}
 
         <s-section heading="Filter appearance">
           <s-stack direction="block" gap="base">
@@ -611,6 +726,14 @@ function ColorField({ name, label, value }: { name: string; label: string; value
  * It is a static drawing, not a live widget: no requests, no interactivity, no
  * chance of it disagreeing with the real thing because it drifted its own logic.
  */
+const RATIO_CSS: Record<WidgetSettings["cardRatio"], string> = {
+  square: "1 / 1",
+  portrait: "3 / 4",
+  landscape: "4 / 3",
+  wide: "16 / 9",
+  natural: "auto",
+};
+
 function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
   // "auto" can go either way per collection, so the preview shows our cards
   // for it: that is the case worth previewing, since the theme’s cards are
@@ -809,7 +932,7 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
             style={{
               display: "grid",
               gridTemplateColumns: `repeat(${p.gridColumns}, 1fr)`,
-              gap: 12,
+              gap: themeCards ? 12 : p.cardGap,
             }}
           >
             {Array.from({ length: p.gridColumns }).map((_, i) => (
@@ -829,16 +952,35 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
                         padding: 8,
                         opacity: 0.75,
                       }
-                    : null),
+                    : {
+                        background: p.cardBg,
+                        padding: p.cardPadding,
+                        borderRadius: p.cardRadius,
+                        textAlign: p.cardAlign,
+                        border:
+                          p.cardBorder === "line" ? "1px solid rgba(0,0,0,.12)" : undefined,
+                        boxShadow:
+                          p.cardBorder === "shadow"
+                            ? "0 1px 3px rgba(0,0,0,.12), 0 6px 16px rgba(0,0,0,.06)"
+                            : undefined,
+                      }),
                 }}
               >
                 <div
-                  style={{ aspectRatio: "1/1", background: "rgba(0,0,0,.07)", borderRadius: 8 }}
+                  style={{
+                    aspectRatio: themeCards ? "1/1" : RATIO_CSS[p.cardRatio],
+                    minHeight: !themeCards && p.cardRatio === "natural" ? 96 : undefined,
+                    background: "rgba(0,0,0,.07)",
+                    borderRadius: themeCards ? 8 : p.cardRadius,
+                  }}
                 />
                 <div
                   style={{
                     marginTop: 6,
-                    fontWeight: themeCards ? 400 : Number(p.fontWeight),
+                    fontSize: themeCards ? undefined : p.cardTitleSize,
+                    fontWeight: themeCards ? 400 : Number(p.cardTitleWeight),
+                    color: themeCards ? undefined : p.cardTitleColor,
+                    lineHeight: 1.35,
                   }}
                 >
                   {themeCards ? "Your theme’s card" : "Product name"}
@@ -846,20 +988,29 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
                 {p.showVendor && !themeCards && (
                   <div style={{ opacity: 0.6, fontSize: "0.85em" }}>Brand</div>
                 )}
-                <div style={{ fontWeight: 600 }}>£00.00</div>
+                <div
+                  style={{
+                    fontSize: themeCards ? undefined : p.cardPriceSize,
+                    fontWeight: themeCards ? 600 : Number(p.cardPriceWeight),
+                    color: themeCards ? undefined : p.cardPriceColor,
+                  }}
+                >
+                  £00.00
+                </div>
                 {p.quickAdd && !themeCards && (
                   <div
                     style={{
                       marginTop: 6,
-                      padding: "0.35em 0",
+                      padding: "0.5em 0.75em",
                       textAlign: "center",
-                      borderRadius: radius,
-                      background: p.accentColor,
-                      color: "#fff",
-                      fontSize: "0.85em",
+                      borderRadius: p.cardButtonRadius,
+                      background: p.cardButtonBg,
+                      color: p.cardButtonText,
+                      fontSize: "0.9em",
+                      display: p.cardButtonFullWidth ? "block" : "inline-block",
                     }}
                   >
-                    Add to cart
+                    {p.cardButtonLabel}
                   </div>
                 )}
               </div>
@@ -868,7 +1019,11 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
           <s-text color="subdued">
             {themeCards
               ? `Your theme draws these cards · filters as a ${p.filterLayout}`
-              : `${p.gridColumns} columns · filters as a ${p.filterLayout} · ${p.resultsPerPage} per page`}
+              : `${
+                  p.productCards === "app"
+                    ? "This app draws these cards"
+                    : "This app draws these cards when a filter needs it"
+                } · ${p.gridColumns} columns · filters as a ${p.filterLayout} · ${p.resultsPerPage} per page`}
           </s-text>
         </div>
       </div>

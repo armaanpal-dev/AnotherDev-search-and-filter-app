@@ -164,7 +164,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-facet__num { width: 72px; padding: 0.35rem 0.4rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; font: inherit; }
 .adsf-facet__apply { padding: 0.35rem 0.6rem; border: 0; border-radius: 6px; background: var(--adsf-accent, #111); color: #fff; cursor: pointer; }
 
-.adsf-grid { display: grid; grid-template-columns: repeat(var(--adsf-cols, 4), 1fr); gap: 1.25rem; min-height: 300px; align-items: stretch; }
+.adsf-grid { display: grid; grid-template-columns: repeat(var(--adsf-cols, 4), 1fr); gap: var(--adsf-card-gap, 1.25rem); min-height: 300px; align-items: stretch; }
 .adsf-grid[aria-busy="true"] { opacity: 0.5; }
 /* ---- Product cards ---------------------------------------------------
    These inherit the storefront rather than styling themselves. Font family,
@@ -177,21 +177,49 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 /* A column so every card in a row lines up: image, then text, then the button
    pushed to the bottom. Without this a card with Add to cart was taller than
    one without, and a card with no image collapsed, so rows staggered. */
-.adsf-card { position: relative; display: flex; flex-direction: column; height: 100%; }
+.adsf-card {
+  position: relative; display: flex; flex-direction: column; height: 100%;
+  background: var(--adsf-card-bg, transparent);
+  padding: var(--adsf-card-pad, 0);
+  border-radius: var(--adsf-card-radius, 0);
+  text-align: var(--adsf-card-align, left);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
 .adsf-card > a { flex: 1 1 auto; }
 .adsf-card__add { margin-top: auto; }
 .adsf-card a { text-decoration: none; color: inherit; display: block; }
 .adsf-card__img, .adsf-card__noimg {
-  width: 100%; display: block; object-fit: cover;
+  width: 100%; display: block;
+  object-fit: var(--adsf-card-fit, cover);
   aspect-ratio: var(--adsf-card-ratio, 1 / 1);
   border-radius: var(--adsf-card-radius, 0);
   background: var(--adsf-card-placeholder, rgba(0, 0, 0, 0.06));
+  transition: transform 0.25s ease;
 }
 .adsf-card__title {
   margin: 0.5rem 0 0.25rem;
-  font: inherit; color: inherit; line-height: inherit;
+  /* Font FAMILY still comes from the theme. Only what a merchant actually
+     asked to control is overridden, so a card still reads as part of the
+     shop rather than as a widget dropped onto it. */
+  font-family: inherit;
+  font-size: var(--adsf-card-title-size, inherit);
+  font-weight: var(--adsf-card-title-weight, inherit);
+  color: var(--adsf-card-title-color, inherit);
+  line-height: 1.35;
+  /* Clamped so every card in a row is the same height: a two-line title
+     beside a one-line title is what made rows stagger. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--adsf-card-title-lines, 2);
+  line-clamp: var(--adsf-card-title-lines, 2);
+  overflow: hidden;
 }
-.adsf-card__price { font: inherit; color: inherit; }
+.adsf-card__price {
+  font-family: inherit;
+  font-size: var(--adsf-card-price-size, inherit);
+  font-weight: var(--adsf-card-price-weight, inherit);
+  color: var(--adsf-card-price-color, inherit);
+}
 .adsf-card__soldout {
   position: absolute; top: 8px; left: 8px;
   background: var(--adsf-card-placeholder, rgba(255, 255, 255, 0.92));
@@ -647,4 +675,46 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .adsf-camera.is-busy { animation: none; }
+}
+
+/* ---- Product card appearance -----------------------------------------
+   Everything a merchant can set under Settings > Product card appearance.
+   Values arrive as CSS variables set on <html> by applySettings. The two
+   things a variable cannot express - a whole border rule and a hover
+   effect - are classes on <html> instead. */
+
+/* Chrome is opt-in: no border and no shadow is the default, because most
+   themes lay products directly on the page rather than inside a box. */
+.adsf-card-line .adsf-card { border: 1px solid rgba(0, 0, 0, 0.12); }
+.adsf-card-shadow .adsf-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+.adsf-card-hover-lift .adsf-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+/* The link clips the image, so a zoom cannot bleed past the corners. */
+.adsf-card-hover-zoom .adsf-card a { overflow: hidden; border-radius: var(--adsf-card-radius, 0); }
+.adsf-card-hover-zoom .adsf-card:hover .adsf-card__img { transform: scale(1.06); }
+
+/* Button. Declared after the base rule so these win without !important. */
+.adsf-card__add {
+  width: auto;
+  align-self: var(--adsf-card-btn-self, stretch);
+  background: var(--adsf-card-btn-bg, transparent);
+  color: var(--adsf-card-btn-text, inherit);
+  border-color: var(--adsf-card-btn-border, currentColor);
+  border-radius: var(--adsf-card-btn-radius, 0);
+}
+.adsf-card__add--full { width: 100%; }
+.adsf-card__add:hover:not(:disabled) {
+  background: var(--adsf-card-btn-bg, #111);
+  color: var(--adsf-card-btn-text, #fff);
+  filter: brightness(1.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adsf-card, .adsf-card__img { transition: none; }
+  .adsf-card-hover-lift .adsf-card:hover { transform: none; }
+  .adsf-card-hover-zoom .adsf-card:hover .adsf-card__img { transform: none; }
 }

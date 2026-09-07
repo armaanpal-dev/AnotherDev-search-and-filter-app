@@ -748,6 +748,11 @@
   // =======================================================================
   //  2. Faceted results application
   // =======================================================================
+  /** The merchant’s add-to-cart wording, falling back to the default. */
+  function addLabel(cfg) {
+    return (cfg && cfg.cardButtonLabel) || "Add to cart";
+  }
+
   function initResultsApp(root, globalCfg) {
     if (!claim(root)) return;
     // The facet UI is presented four ways; the stylesheet does the work, so
@@ -892,7 +897,11 @@
         (p.available ? "" : '<span class="adsf-card__soldout">Sold out</span>') +
         "</a>" +
         (canQuickAdd
-          ? '<button type="button" class="adsf-card__add" data-adsf-add="' + esc(p.variantId) + '" data-adsf-add-product="' + esc(p.productId) + '">Add to cart</button>'
+          ? '<button type="button" class="adsf-card__add' +
+            (cfg.cardButtonFullWidth === false ? "" : " adsf-card__add--full") +
+            '" data-adsf-add="' + esc(p.variantId) +
+            '" data-adsf-add-product="' + esc(p.productId) + '">' +
+            esc(addLabel(cfg)) + "</button>"
           : "") +
         "</article>";
     }
@@ -919,11 +928,11 @@
               // Most themes listen for one of these to re-render the cart bubble.
               document.dispatchEvent(new CustomEvent("cart:refresh", { bubbles: true }));
               document.dispatchEvent(new CustomEvent("cart:build", { bubbles: true }));
-              setTimeout(function () { btn.disabled = false; btn.textContent = "Add to cart"; }, 2500);
+              setTimeout(function () { btn.disabled = false; btn.textContent = addLabel(cfg); }, 2500);
             })
             .catch(function () {
               btn.textContent = "Unavailable";
-              setTimeout(function () { btn.disabled = false; btn.textContent = "Add to cart"; }, 2500);
+              setTimeout(function () { btn.disabled = false; btn.textContent = addLabel(cfg); }, 2500);
             });
         });
       });
@@ -2430,6 +2439,8 @@
     cfg.collectionFilters = s.collectionFilters !== false;
     cfg.filterLayout = s.filterLayout || "sidebar";
     cfg.productCards = s.productCards || "auto";
+    cfg.cardButtonLabel = s.cardButtonLabel || "";
+    cfg.cardButtonFullWidth = s.cardButtonFullWidth !== false;
     cfg.showFacetCounts = s.showFacetCounts !== false;
     cfg.resultsPerPage = s.resultsPerPage || 24;
     cfg.gridColumns = s.gridColumns || 4;
@@ -2463,6 +2474,46 @@
     if (s.fontSize) rs.setProperty("--adsf-dd-font-size", s.fontSize + "px");
     if (s.fontWeight) rs.setProperty("--adsf-dd-font-weight", s.fontWeight);
     if (s.gridColumns) rs.setProperty("--adsf-cols", String(s.gridColumns));
+
+    // Product card appearance. Every value was validated server-side by
+    // resolveSettings - colours against a strict pattern, numbers clamped,
+    // the button label stripped of angle brackets - so nothing here can
+    // escape the declaration it lands in.
+    var RATIOS = {
+      square: "1 / 1",
+      portrait: "3 / 4",
+      landscape: "4 / 3",
+      wide: "16 / 9",
+      natural: "auto",
+    };
+    rs.setProperty("--adsf-card-ratio", RATIOS[s.cardRatio] || RATIOS.square);
+    rs.setProperty("--adsf-card-fit", s.cardImageFit === "contain" ? "contain" : "cover");
+    rs.setProperty("--adsf-card-align", s.cardAlign === "center" ? "center" : "left");
+    if (s.cardRadius != null) rs.setProperty("--adsf-card-radius", s.cardRadius + "px");
+    if (s.cardBg) rs.setProperty("--adsf-card-bg", s.cardBg);
+    if (s.cardPadding != null) rs.setProperty("--adsf-card-pad", s.cardPadding + "px");
+    if (s.cardGap != null) rs.setProperty("--adsf-card-gap", s.cardGap + "px");
+    if (s.cardTitleSize) rs.setProperty("--adsf-card-title-size", s.cardTitleSize + "px");
+    if (s.cardTitleWeight) rs.setProperty("--adsf-card-title-weight", String(s.cardTitleWeight));
+    if (s.cardTitleColor) rs.setProperty("--adsf-card-title-color", s.cardTitleColor);
+    if (s.cardTitleLines) rs.setProperty("--adsf-card-title-lines", String(s.cardTitleLines));
+    if (s.cardPriceSize) rs.setProperty("--adsf-card-price-size", s.cardPriceSize + "px");
+    if (s.cardPriceWeight) rs.setProperty("--adsf-card-price-weight", String(s.cardPriceWeight));
+    if (s.cardPriceColor) rs.setProperty("--adsf-card-price-color", s.cardPriceColor);
+    if (s.cardButtonBg) {
+      rs.setProperty("--adsf-card-btn-bg", s.cardButtonBg);
+      rs.setProperty("--adsf-card-btn-border", s.cardButtonBg);
+    }
+    if (s.cardButtonText) rs.setProperty("--adsf-card-btn-text", s.cardButtonText);
+    if (s.cardButtonRadius != null) rs.setProperty("--adsf-card-btn-radius", s.cardButtonRadius + "px");
+    rs.setProperty("--adsf-card-btn-self", s.cardButtonFullWidth === false ? "flex-start" : "stretch");
+    // Chrome and hover are classes, not variables: CSS cannot switch a whole
+    // rule on the value of a custom property.
+    var root = document.documentElement;
+    root.classList.toggle("adsf-card-line", s.cardBorder === "line");
+    root.classList.toggle("adsf-card-shadow", s.cardBorder === "shadow");
+    root.classList.toggle("adsf-card-hover-zoom", s.cardHover === "zoom");
+    root.classList.toggle("adsf-card-hover-lift", s.cardHover === "lift");
     return cfg;
   }
 
@@ -2484,6 +2535,7 @@
       searchOn: true,
       filtersOn: true,
       productCards: "auto",
+      cardButtonFullWidth: true,
       autoAttach: g.autoAttach !== false,
       searchTakeover: true,
       collectionFilters: true,
