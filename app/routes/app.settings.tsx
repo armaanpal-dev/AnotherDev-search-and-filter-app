@@ -306,10 +306,16 @@ export default function SettingsPage() {
       {/* Every setting still exists; the tabs only decide which are on screen.
           The inactive tabs are secondary rather than tertiary buttons: tertiary
           renders borderless, so the bar read as a line of text and the other
-          three groups looked deleted rather than merely hidden. */}
+          three groups looked deleted rather than merely hidden.
+
+          Laid out with s-stack, NOT s-button-group. Both typecheck, but
+          s-button-group rendered its children as nothing at all in the live
+          admin — the section heading and the caption below it appeared while the
+          four buttons did not. s-stack direction="inline" is what the Polaris
+          guidance points at for content that sizes to itself, buttons included. */}
       <s-section heading="Settings">
         <s-stack direction="block" gap="base">
-          <s-button-group gap="base">
+          <s-stack direction="inline" gap="small-300">
             {TABS.map((t) => (
               <s-button
                 key={t.key}
@@ -319,7 +325,7 @@ export default function SettingsPage() {
                 {t.label}
               </s-button>
             ))}
-          </s-button-group>
+          </s-stack>
           <s-text color="subdued">
             {TABS.find((t) => t.key === tab)?.blurb}
           </s-text>
