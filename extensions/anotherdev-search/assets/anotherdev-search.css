@@ -255,21 +255,72 @@ body.adsf-collection-active .collection__filters { display: none !important; }
    grid keeps its own column count, so the theme still controls how its
    cards lay out inside the narrower space. */
 .adsf-themegrid__shell {
-  display: grid; grid-template-columns: 240px minmax(0, 1fr);
-  gap: 1.75rem; align-items: start;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 0 2.5rem; align-items: start;
+}
+/* Optional width override: the app stops inheriting the theme’s container
+   and sets its own measure and edge padding. */
+.adsf-themegrid__shell--width {
+  max-width: var(--adsf-coll-max, 1400px);
+  margin-inline: auto;
+  padding-inline: var(--adsf-coll-pad, 24px);
+  box-sizing: border-box;
+}
+/* The panel itself draws nothing; display:contents lifts its two children —
+   the sort row and the filter column — into the shell so they can be placed
+   independently. Without it the sort control was trapped in the narrow left
+   column instead of sitting above the products. */
+.adsf-app--filters-sidebar.adsf-themegrid { display: contents; }
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-app__topbar {
+  grid-column: 2; grid-row: 1;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding: 0 0 1rem;
+}
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-facets {
+  grid-column: 1; grid-row: 1 / span 2;
+}
+.adsf-themegrid__shell > .adsf-themegrid__products {
+  grid-column: 2; grid-row: 2;
+}
+/* Sidebar title, sitting on the same line as the product count and sort. */
+.adsf-facets__heading { display: none; }
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-facets__heading {
+  display: block;
+  padding: 0 0 1rem;
+  font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  font-size: 0.8em;
+  color: var(--adsf-filter-active-bg, var(--adsf-accent, inherit));
 }
 .adsf-themegrid__shell > .adsf-themegrid { margin: 0; }
-.adsf-app--filters-sidebar.adsf-themegrid .adsf-facets__inner,
-.adsf-app--filters-inline.adsf-themegrid .adsf-facets__inner {
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-facets__inner {
   flex-direction: column; align-items: stretch; gap: 0.75rem;
   border: 0; padding: 0;
 }
-/* Open by default in a sidebar: a dropdown inside a column is pointless. */
-.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__pop,
+/* Inline: one open row above the products, not a column beside them. */
+.adsf-app--filters-inline.adsf-themegrid .adsf-facets__inner {
+  flex-direction: row; flex-wrap: wrap; align-items: flex-start;
+  gap: 1rem 2rem; border: 0; padding: 0 0 1rem;
+}
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd { min-width: 170px; }
+/* In a column the panel expands in place instead of floating.
+
+   It must NOT force `display: block`: that beat the [hidden] attribute the
+   toggle sets, so every group was stuck open and the whole sidebar was one
+   long unscannable list. Closed by default now, opening on click. */
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__pop {
+  position: static; min-width: 0; max-height: none;
+  border: 0; box-shadow: none; padding: 0.35rem 0 0.75rem; background: none;
+}
+/* Inline is the one layout that IS always open, so here display:block
+   overriding [hidden] is the intended behaviour rather than the bug it was
+   in the sidebar. */
 .adsf-app--filters-inline.adsf-themegrid .adsf-fdd__pop {
   position: static; display: block; min-width: 0; max-height: none;
   border: 0; box-shadow: none; padding: 0.35rem 0 0.75rem; background: none;
 }
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd__caret { display: none; }
 /* A sidebar row is laid out differently from a pill in a toolbar, but it is
    still the merchant’s button: only the LAYOUT is overridden here, and every
    colour and radius still comes from the settings. Hardcoding
@@ -277,7 +328,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
    specificity, which is why filter appearance appeared to do nothing. */
 .adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn,
 .adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn {
-  width: 100%; justify-content: space-between;
+  justify-content: space-between;
   border: 0; font-weight: 600;
   /* Enough padding that a merchant-set background reads as a surface rather
      than as text with a coloured halo; small enough to still look flush. */
@@ -294,7 +345,9 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn:hover,
 .adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn:hover {
   background: var(--adsf-filter-hover-bg, var(--adsf-filter-bg, none));
+  color: var(--adsf-filter-hover-text, var(--adsf-filter-text, inherit));
 }
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn { width: 100%; }
 .adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd,
 .adsf-app--filters-inline.adsf-themegrid .adsf-fdd {
   border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
@@ -304,6 +357,14 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 @media (max-width: 749px) {
   /* One column on a phone; the toggle button brings the filters back. */
   .adsf-themegrid__shell { grid-template-columns: 1fr; gap: 1rem; }
+  /* The explicit placements above assume two columns. Undo them, or the
+     sort row and the grid land on top of each other. */
+  .adsf-app--filters-sidebar.adsf-themegrid .adsf-app__topbar,
+  .adsf-app--filters-sidebar.adsf-themegrid .adsf-facets,
+  .adsf-themegrid__shell > .adsf-themegrid__products {
+    grid-column: 1; grid-row: auto;
+  }
+  .adsf-themegrid__shell--width { padding-inline: var(--adsf-coll-pad, 16px); }
 }
 .adsf-themegrid .adsf-app__topbar { padding: 0 0 0.5rem; }
 /* Dropdown filter buttons. Colours are variables so the merchant can set them
@@ -320,7 +381,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 /* Hover must not repaint the label a different colour: only the surface moves. */
 .adsf-fdd__btn:hover {
   background: var(--adsf-filter-hover-bg, color-mix(in srgb, currentColor 8%, transparent));
-  color: var(--adsf-filter-text, inherit);
+  color: var(--adsf-filter-hover-text, var(--adsf-filter-text, inherit));
 }
 .adsf-fdd__btn.is-active {
   background: var(--adsf-filter-active-bg, var(--adsf-accent, #111));
@@ -362,14 +423,47 @@ body.adsf-collection-active .collection__filters { display: none !important; }
    the results root. The default (sidebar) is the base CSS above, so only
    the other three need rules. */
 
-/* Toolbar: facet groups flow in one row above the grid. */
+/* Toolbar: a row of DROPDOWN buttons above the grid.
+   The panel is absolutely positioned so opening one covers the products
+   rather than shoving them down the page — which is the behaviour that made
+   this setting feel identical to "inline" below. */
 .adsf-app--filters-topbar .adsf-app__body { grid-template-columns: 1fr; }
 .adsf-app--filters-topbar .adsf-facets__inner {
-  position: static; flex-direction: row; flex-wrap: wrap; gap: 1rem 1.5rem;
-  padding: 0.75rem 0 1rem; border-bottom: 1px solid #eee; margin-bottom: 1.25rem;
+  position: static; flex-direction: row; flex-wrap: wrap;
+  align-items: center; gap: 0.5rem;
+  padding: 0 0 1rem; margin-bottom: 1.25rem;
 }
-.adsf-app--filters-topbar .adsf-facet { min-width: 150px; }
-.adsf-app--filters-topbar .adsf-facet__list { max-height: 190px; }
+.adsf-app--filters-topbar .adsf-facet { position: relative; min-width: 0; }
+.adsf-app--filters-topbar .adsf-facet__title { margin: 0; }
+/* The toggle becomes the pill, painted from the merchant’s filter colours. */
+.adsf-app--filters-topbar .adsf-facet__toggle {
+  width: auto; gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--adsf-filter-border, color-mix(in srgb, currentColor 25%, transparent));
+  border-radius: var(--adsf-filter-radius, 999px);
+  background: var(--adsf-filter-bg, transparent);
+  color: var(--adsf-filter-text, inherit);
+}
+.adsf-app--filters-topbar .adsf-facet__toggle[aria-expanded="true"] {
+  background: var(--adsf-filter-active-bg, var(--adsf-accent, #111));
+  color: var(--adsf-filter-active-text, #fff);
+  border-color: var(--adsf-filter-active-bg, var(--adsf-accent, #111));
+}
+.adsf-app--filters-topbar .adsf-facet__body {
+  position: absolute; z-index: 60; top: calc(100% + 6px); left: 0;
+  min-width: 230px; max-height: 320px; overflow-y: auto;
+  margin-top: 0; padding: 0.6rem 0.75rem;
+  background: var(--adsf-filter-pop-bg, #fff);
+  color: var(--adsf-filter-text, inherit);
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: var(--adsf-filter-pop-radius, 10px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+}
+.adsf-app--filters-topbar .adsf-facet__list { max-height: 220px; }
+/* Near the right edge the panel would overflow the viewport. */
+.adsf-app--filters-topbar .adsf-facet:nth-last-child(-n + 2) .adsf-facet__body {
+  left: auto; right: 0;
+}
 
 /* Inline: facets always visible, stacked above the grid. */
 .adsf-app--filters-inline .adsf-app__body { grid-template-columns: 1fr; }
@@ -737,4 +831,19 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   .adsf-card, .adsf-card__img { transition: none; }
   .adsf-card-hover-lift .adsf-card:hover { transform: none; }
   .adsf-card-hover-zoom .adsf-card:hover .adsf-card__img { transform: none; }
+}
+
+/* ---- Collection grid columns -----------------------------------------
+   An override for the THEME’s own product grid on collection pages, applied
+   only when the merchant switches it on. !important is deliberate: this has
+   to beat the theme’s own grid rules, which are always more specific than
+   anything we can write against an element we did not author. */
+.adsf-collection-cols {
+  display: grid !important;
+  grid-template-columns: repeat(var(--adsf-coll-cols, 4), minmax(0, 1fr)) !important;
+}
+@media (max-width: 749px) {
+  .adsf-collection-cols {
+    grid-template-columns: repeat(var(--adsf-coll-cols-mobile, 2), minmax(0, 1fr)) !important;
+  }
 }

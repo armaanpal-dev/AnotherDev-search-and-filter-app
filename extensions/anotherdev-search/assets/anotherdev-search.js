@@ -911,6 +911,20 @@
     // switching layout is one class rather than four render paths.
     var layout = (globalCfg && globalCfg.filterLayout) || "sidebar";
     root.classList.add("adsf-app--filters-" + layout);
+
+    // A dropdown that only closes by clicking its own button is a trap on a
+    // phone, where the button may have scrolled out of view.
+    if (layout === "topbar") {
+      document.addEventListener("click", function (e) {
+        // e.target is an Element for any real click, but a synthetic event can
+        // carry a document or a text node, and closest() does not exist there.
+        var t = e.target && e.target.nodeType === 1 ? e.target : null;
+        if (!t || !root.contains(t) || !t.closest(".adsf-facet")) closeAllFacets();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeAllFacets();
+      });
+    }
     var cfg = Object.assign({}, globalCfg || {}, {
       proxy: root.getAttribute("data-proxy") || (globalCfg && globalCfg.proxy) || "/apps/anotherdev-search",
       moneyFormat: root.getAttribute("data-money-format") || (globalCfg && globalCfg.moneyFormat),
@@ -1222,19 +1236,32 @@
 
     function renderFacets(facets) {
       facetsInner.innerHTML = "";
+
+      // "Toolbar" is a row of dropdowns, not a row of open lists.
+      //
+      // It used to render exactly like "inline" — every facet expanded, side
+      // by side — so the two settings were indistinguishable, and opening or
+      // closing one pushed the product grid up and down the page. Toolbar now
+      // starts closed and opens over the grid; inline stays permanently open.
+      var asDropdown = layout === "topbar";
+
       facets.forEach(function (f) {
         var group = el("div", "adsf-facet");
         var heading = el("h4", "adsf-facet__title");
         var btn = el("button", "adsf-facet__toggle");
         btn.type = "button";
-        btn.setAttribute("aria-expanded", "true");
+        btn.setAttribute("aria-expanded", asDropdown ? "false" : "true");
         btn.textContent = f.label;
         heading.appendChild(btn);
         group.appendChild(heading);
 
         var bodyWrap = el("div", "adsf-facet__body");
+        bodyWrap.hidden = asDropdown;
         btn.addEventListener("click", function () {
           var open = btn.getAttribute("aria-expanded") === "true";
+          // One open at a time in the toolbar: two overlapping panels on the
+          // same row cover each other.
+          if (asDropdown && !open) closeAllFacets();
           btn.setAttribute("aria-expanded", String(!open));
           bodyWrap.hidden = open;
         });
@@ -1246,6 +1273,19 @@
         }
         group.appendChild(bodyWrap);
         facetsInner.appendChild(group);
+      });
+    }
+
+    /** Collapse every open facet panel. Only meaningful in the toolbar. */
+    function closeAllFacets() {
+      var open = facetsInner.querySelectorAll(
+        '.adsf-facet__toggle[aria-expanded="true"]',
+      );
+      Array.prototype.forEach.call(open, function (b) {
+        b.setAttribute("aria-expanded", "false");
+        var body = b.closest(".adsf-facet");
+        body = body && body.querySelector(".adsf-facet__body");
+        if (body) body.hidden = true;
       });
     }
 
@@ -2018,6 +2058,28 @@
     });
   }
 
+  /**
+   * Force the theme’s collection grid to a column count, when asked to.
+   *
+   * Re-applied after every swap, not just once: the grid element is replaced
+   * wholesale by the Section Rendering response, so a class set on the
+   * original node is gone the first time a filter is used.
+   */
+  function applyCollectionColumns(cfg, node) {
+    if (!node) return;
+    // The shell places its children explicitly, so the grid needs a hook of
+    // its own. Set here rather than once at init because the Section
+    // Rendering response replaces this element outright.
+    node.classList.add("adsf-themegrid__products");
+    if (!cfg || !cfg.collectionColumnsEnabled) return;
+    node.classList.add("adsf-collection-cols");
+    node.style.setProperty("--adsf-coll-cols", String(cfg.collectionColumns || 4));
+    node.style.setProperty(
+      "--adsf-coll-cols-mobile",
+      String(cfg.collectionColumnsMobile || 2),
+    );
+  }
+
   function initThemeGridFacets(cfg, handle, grid, preloadedFacets) {
     var section = sectionIdFor(grid);
     if (!section) return false;
@@ -2027,6 +2089,7 @@
     // horizontal. "sidebar" wraps the theme's grid in two columns so the
     // filters sit beside it, open, the way most storefronts present them.
     var layout = cfg.filterLayout || "sidebar";
+    applyCollectionColumns(cfg, grid);
     var panel = el(
       "div",
       "adsf-app adsf-themegrid adsf-app--filters-" + layout,
@@ -2050,13 +2113,28 @@
       "</div>" +
       '<div class="adsf-app__chips" data-adsf-chips></div>' +
       '<aside class="adsf-facets" data-adsf-facets aria-label="Filters">' +
+      '<div class="adsf-facets__heading">Filters</div>' +
       '<div class="adsf-facets__inner" data-adsf-facets-inner></div></aside>';
     // Mounted inside the theme's page container, next to the grid, so it
     // inherits page width and padding. Inserting before the whole section
     // put it outside that container and it ran full-bleed.
-    if (layout === "sidebar" || layout === "inline") {
+    if (layout === "sidebar") {
       // Wrap the grid so filters can sit in their own column beside it.
+      // Sidebar only: "inline" promises facets stacked ABOVE the grid, and
+      // sharing this branch made it a second, identical sidebar.
       var shell = el("div", "adsf-themegrid__shell");
+      if (cfg.collectionWidthEnabled) {
+        // Overriding the theme’s container rather than living inside it.
+        shell.classList.add("adsf-themegrid__shell--width");
+        shell.style.setProperty(
+          "--adsf-coll-max",
+          (cfg.collectionMaxWidth || 1400) + "px",
+        );
+        shell.style.setProperty(
+          "--adsf-coll-pad",
+          (cfg.collectionSidePadding == null ? 24 : cfg.collectionSidePadding) + "px",
+        );
+      }
       grid.parentNode.insertBefore(shell, grid);
       shell.appendChild(panel);
       shell.appendChild(grid);
@@ -2107,6 +2185,7 @@
           if (fresh && grid.parentNode) {
             grid.parentNode.replaceChild(fresh, grid);
             grid = fresh;
+            applyCollectionColumns(cfg, grid);
           }
           grid.setAttribute("aria-busy", "false");
           if (meta) {
@@ -2233,7 +2312,10 @@
         btn.addEventListener("click", function (e) {
           e.stopPropagation();
           var open = pop.hidden;
-          closeAllPops();
+          // In a column the panels stack, so several can be open at once and
+          // closing the others would fight the merchant. Only the floating
+          // layouts, where panels overlap, are exclusive.
+          if (layout !== "sidebar" && layout !== "inline") closeAllPops();
           pop.hidden = !open;
           btn.setAttribute("aria-expanded", String(open));
         });
@@ -2640,6 +2722,13 @@
     cfg.searchTakeover = s.searchTakeover !== false;
     cfg.collectionFilters = s.collectionFilters !== false;
     cfg.filterLayout = s.filterLayout || "sidebar";
+    cfg.collectionColumnsEnabled = s.collectionColumnsEnabled === true;
+    cfg.collectionWidthEnabled = s.collectionWidthEnabled === true;
+    cfg.collectionMaxWidth = s.collectionMaxWidth || 1400;
+    cfg.collectionSidePadding =
+      s.collectionSidePadding == null ? 24 : s.collectionSidePadding;
+    cfg.collectionColumns = s.collectionColumns || 4;
+    cfg.collectionColumnsMobile = s.collectionColumnsMobile || 2;
     cfg.productCards = s.productCards || "auto";
     cfg.cardButtonLabel = s.cardButtonLabel || "";
     cfg.cardButtonFullWidth = s.cardButtonFullWidth !== false;
@@ -2669,6 +2758,8 @@
     if (s.filterButtonText) rs.setProperty("--adsf-filter-text", s.filterButtonText);
     if (s.filterActiveBg) rs.setProperty("--adsf-filter-active-bg", s.filterActiveBg);
     if (s.filterActiveText) rs.setProperty("--adsf-filter-active-text", s.filterActiveText);
+    if (s.filterHoverText) rs.setProperty("--adsf-filter-hover-text", s.filterHoverText);
+    if (s.filterHoverBg) rs.setProperty("--adsf-filter-hover-bg", s.filterHoverBg);
     if (s.accentColor) rs.setProperty("--adsf-accent", s.accentColor);
     if (s.backgroundColor) rs.setProperty("--adsf-dd-bg", s.backgroundColor);
     if (s.textColor) rs.setProperty("--adsf-dd-text", s.textColor);
@@ -2753,6 +2844,7 @@
       searchTakeover: true,
       collectionFilters: true,
       filterLayout: "sidebar",
+      collectionColumnsEnabled: false,
       resultsPerPage: 24,
       gridColumns: 4,
       showVendor: false,

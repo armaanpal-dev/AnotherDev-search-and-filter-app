@@ -104,6 +104,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     fontSize: numeric("fontSize"),
     filterLayout: field("filterLayout"),
     productCards: field("productCards"),
+    collectionWidthEnabled: checkbox("collectionWidthEnabled"),
+    collectionMaxWidth: numeric("collectionMaxWidth"),
+    collectionSidePadding: numeric("collectionSidePadding"),
+    collectionColumnsEnabled: checkbox("collectionColumnsEnabled"),
+    collectionColumns: numeric("collectionColumns"),
+    collectionColumnsMobile: numeric("collectionColumnsMobile"),
     cardRatio: field("cardRatio"),
     cardImageHeight: numeric("cardImageHeight"),
     cardImageFit: field("cardImageFit"),
@@ -131,6 +137,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     filterButtonText: field("filterButtonText"),
     filterActiveBg: field("filterActiveBg"),
     filterActiveText: field("filterActiveText"),
+    filterHoverText: field("filterHoverText"),
+    filterHoverBg: field("filterHoverBg"),
     showFacetCounts: checkbox("showFacetCounts"),
     panelStyle: field("panelStyle"),
     layout: field("layout"),
@@ -189,6 +197,72 @@ const PREVIEW_HEADING: Record<TabKey, string> = {
   cards: "Product card preview",
   advanced: "",
 };
+
+/**
+ * The tab strip: which group of settings is on screen.
+ *
+ * Native buttons, because this sits OUTSIDE the settings form (so there is no
+ * submit to guard against) and because the active tab needs to sit on the
+ * baseline rule with its underline joining it — which is what makes a strip
+ * read as tabs rather than as a toolbar. The -1px margin pulls each button over
+ * the container rule so the active underline replaces it rather than stacking
+ * beneath it.
+ */
+function TabStrip({
+  active,
+  onSelect,
+}: {
+  active: TabKey;
+  onSelect: (key: TabKey) => void;
+}) {
+  return (
+    <div style={{ marginBottom: "0.75rem" }}>
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        style={{
+          display: "flex",
+          gap: "0.25rem",
+          borderBottom: "1px solid rgba(128,128,128,.3)",
+          overflowX: "auto",
+        }}
+      >
+        {TABS.map((t) => {
+          const on = t.key === active;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => onSelect(t.key)}
+              style={{
+                appearance: "none",
+                background: "none",
+                border: 0,
+                borderBottom: on
+                  ? "2px solid currentColor"
+                  : "2px solid transparent",
+                marginBottom: -1,
+                padding: "0.7rem 0.85rem",
+                font: "inherit",
+                fontWeight: on ? 600 : 450,
+                opacity: on ? 1 : 0.6,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ padding: "0.6rem 0.1rem 0", opacity: 0.65, fontSize: "0.85em" }}>
+        {TABS.find((t) => t.key === active)?.blurb}
+      </div>
+    </div>
+  );
+}
 
 /**
  * One tab’s worth of sections, hidden rather than unmounted.
@@ -337,34 +411,26 @@ export default function SettingsPage() {
         <s-text color="subdued">Storefront: {domain}</s-text>
       </s-section>
 
-      {/* Every setting still exists; the tabs only decide which are on screen.
-          The inactive tabs are secondary rather than tertiary buttons: tertiary
-          renders borderless, so the bar read as a line of text and the other
-          three groups looked deleted rather than merely hidden.
+      {/* Tabs and everything they switch live inside ONE bordered container, so
+          it is visually obvious that the cards below belong to the selected tab.
+          A detached row of buttons above loose cards read as four unrelated
+          actions rather than as a tab strip.
 
-          Laid out with s-stack, NOT s-button-group. Both typecheck, but
-          s-button-group rendered its children as nothing at all in the live
-          admin — the section heading and the caption below it appeared while the
-          four buttons did not. s-stack direction="inline" is what the Polaris
-          guidance points at for content that sizes to itself, buttons included. */}
-      <s-section heading="Settings">
-        <s-stack direction="block" gap="base">
-          <s-stack direction="inline" gap="small-300">
-            {TABS.map((t) => (
-              <s-button
-                key={t.key}
-                variant={tab === t.key ? "primary" : "secondary"}
-                onClick={() => setTab(t.key)}
-              >
-                {t.label}
-              </s-button>
-            ))}
-          </s-stack>
-          <s-text color="subdued">
-            {TABS.find((t) => t.key === tab)?.blurb}
-          </s-text>
-        </s-stack>
-      </s-section>
+          Built from native <button> elements rather than Polaris components:
+          s-button-group rendered its children as nothing at all here, and a tab
+          needs an underline-and-baseline treatment that a button variant cannot
+          express anyway. Colours are neutral rgba and opacity so the strip works
+          on a light or dark admin without hardcoding either palette. */}
+      <div
+        style={{
+          border: "1px solid rgba(128,128,128,.28)",
+          borderRadius: 14,
+          padding: "0.25rem 0.75rem 0.75rem",
+          background: "rgba(128,128,128,.05)",
+        }}
+      >
+        <TabStrip active={tab} onSelect={setTab} />
+
 
       {/* One preview per tab, showing only what that tab controls. A single
           combined preview meant someone editing filter colours was watching a
@@ -455,6 +521,63 @@ export default function SettingsPage() {
               Automatic keeps your theme’s cards whenever that is possible and
               switches to this app’s only when a filter would otherwise do nothing.
             </s-text>
+            <s-divider />
+            <Check
+              name="collectionWidthEnabled"
+              checked={s.collectionWidthEnabled}
+              label="Set my own page width for collection pages"
+            />
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <s-number-field
+                name="collectionMaxWidth"
+                label="Maximum width (px)"
+                min={600}
+                max={2400}
+                defaultValue={String(s.collectionMaxWidth)}
+                {...(s.collectionWidthEnabled ? {} : { disabled: true })}
+              />
+              <s-number-field
+                name="collectionSidePadding"
+                label="Space at the sides (px)"
+                min={0}
+                max={120}
+                defaultValue={String(s.collectionSidePadding)}
+                {...(s.collectionWidthEnabled ? {} : { disabled: true })}
+              />
+            </s-grid>
+            <s-text color="subdued">
+              Leave this off to sit inside your theme&rsquo;s own page container.
+            </s-text>
+
+            <s-divider />
+            <Check
+              name="collectionColumnsEnabled"
+              checked={s.collectionColumnsEnabled}
+              label="Set how many products fit in a row on collection pages"
+            />
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <s-number-field
+                name="collectionColumns"
+                label="Per row on desktop"
+                min={1}
+                max={6}
+                defaultValue={String(s.collectionColumns)}
+                {...(s.collectionColumnsEnabled ? {} : { disabled: true })}
+              />
+              <s-number-field
+                name="collectionColumnsMobile"
+                label="Per row on mobile"
+                min={1}
+                max={4}
+                defaultValue={String(s.collectionColumnsMobile)}
+                {...(s.collectionColumnsEnabled ? {} : { disabled: true })}
+              />
+            </s-grid>
+            <s-text color="subdued">
+              Leave this off to keep your theme’s own layout, including any
+              in-between sizes it uses on tablets.
+            </s-text>
+
             {s.productCards === "theme" && (
               <s-banner tone="info">
                 <s-paragraph>
@@ -603,6 +726,10 @@ export default function SettingsPage() {
             <s-grid gridTemplateColumns="1fr 1fr" gap="base">
               <ColorField name="filterActiveBg" label="Selected background" value={s.filterActiveBg} />
               <ColorField name="filterActiveText" label="Selected text" value={s.filterActiveText} />
+            </s-grid>
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <ColorField name="filterHoverBg" label="Hover background" value={s.filterHoverBg} />
+              <ColorField name="filterHoverText" label="Hover text" value={s.filterHoverText} />
             </s-grid>
             <Check name="showFacetCounts" checked={s.showFacetCounts} label="Show the number of products beside each filter value" />
           </s-stack>
@@ -810,6 +937,7 @@ export default function SettingsPage() {
         </s-stack>
       </s-section>
       </Panel>
+      </div>
 
       <s-section slot="aside" heading="How to turn it on">
         <s-paragraph>

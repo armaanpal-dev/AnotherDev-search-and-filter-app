@@ -50,6 +50,28 @@ export interface WidgetSettings {
    *   app    always our grid, so every facet works regardless of the theme
    */
   productCards: "auto" | "theme" | "app";
+  /**
+   * Override the column count of the THEME’s own collection grid.
+   *
+   * Off by default and off means untouched: a merchant who has not asked for
+   * this keeps whatever their theme does, including any responsive steps the
+   * theme defines between our two breakpoints. Turning it on replaces that
+   * with exactly two numbers, which is a real trade — hence the switch
+   * rather than a silent default.
+   */
+  /**
+   * Override the width of the collection filters + grid area.
+   *
+   * Off means the app sits inside whatever container the theme already uses,
+   * which is right for most stores. On lets a merchant widen or narrow it and
+   * set the breathing room at the edges independently of the theme.
+   */
+  collectionWidthEnabled: boolean;
+  collectionMaxWidth: number;    // px
+  collectionSidePadding: number; // px
+  collectionColumnsEnabled: boolean;
+  collectionColumns: number;        // desktop
+  collectionColumnsMobile: number;  // below 750px
 
   /* ---- Product card appearance -------------------------------------------
    * Only reaches the page when this app draws the cards (productCards "app",
@@ -98,6 +120,9 @@ export interface WidgetSettings {
   filterButtonText: string;
   filterActiveBg: string;
   filterActiveText: string;
+  /** Heading colour while the pointer is over a filter. */
+  filterHoverText: string;
+  filterHoverBg: string;
   showFacetCounts: boolean;
   // Layout / look
   panelStyle: "dropdown" | "spotlight";
@@ -133,6 +158,12 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   maxSuggestions: 8,
   collectionFilters: true,
   productCards: "auto",
+  collectionWidthEnabled: false,
+  collectionMaxWidth: 1400,
+  collectionSidePadding: 24,
+  collectionColumnsEnabled: false,
+  collectionColumns: 4,
+  collectionColumnsMobile: 2,
   cardRatio: "square",
   cardImageHeight: 0,
   cardImageFit: "cover",
@@ -161,6 +192,8 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   filterButtonText: "#1a1a1a",
   filterActiveBg: "#111111",
   filterActiveText: "#ffffff",
+  filterHoverText: "#1a1a1a",
+  filterHoverBg: "transparent",
   showFacetCounts: true,
   panelStyle: "spotlight",
   layout: "rich",
@@ -196,6 +229,12 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     maxSuggestions: num(s.maxSuggestions, DEFAULT_SETTINGS.maxSuggestions, 3, 12),
     collectionFilters: bool(s.collectionFilters, DEFAULT_SETTINGS.collectionFilters),
     productCards: oneOf(s.productCards, ["auto", "theme", "app"], DEFAULT_SETTINGS.productCards),
+    collectionWidthEnabled: bool(s.collectionWidthEnabled, DEFAULT_SETTINGS.collectionWidthEnabled),
+    collectionMaxWidth: num(s.collectionMaxWidth, DEFAULT_SETTINGS.collectionMaxWidth, 600, 2400),
+    collectionSidePadding: num(s.collectionSidePadding, DEFAULT_SETTINGS.collectionSidePadding, 0, 120),
+    collectionColumnsEnabled: bool(s.collectionColumnsEnabled, DEFAULT_SETTINGS.collectionColumnsEnabled),
+    collectionColumns: num(s.collectionColumns, DEFAULT_SETTINGS.collectionColumns, 1, 6),
+    collectionColumnsMobile: num(s.collectionColumnsMobile, DEFAULT_SETTINGS.collectionColumnsMobile, 1, 4),
     cardRatio: oneOf(s.cardRatio, ["square", "portrait", "landscape", "wide", "natural"], DEFAULT_SETTINGS.cardRatio),
     cardImageHeight: num(s.cardImageHeight, DEFAULT_SETTINGS.cardImageHeight, 0, 600),
     cardImageFit: oneOf(s.cardImageFit, ["cover", "contain"], DEFAULT_SETTINGS.cardImageFit),
@@ -223,6 +262,8 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     filterButtonText: color(s.filterButtonText, DEFAULT_SETTINGS.filterButtonText),
     filterActiveBg: color(s.filterActiveBg, DEFAULT_SETTINGS.filterActiveBg),
     filterActiveText: color(s.filterActiveText, DEFAULT_SETTINGS.filterActiveText),
+    filterHoverText: color(s.filterHoverText, DEFAULT_SETTINGS.filterHoverText),
+    filterHoverBg: color(s.filterHoverBg, DEFAULT_SETTINGS.filterHoverBg),
     showFacetCounts: bool(s.showFacetCounts, DEFAULT_SETTINGS.showFacetCounts),
     filterLayout: oneOf(
       s.filterLayout,
