@@ -427,6 +427,14 @@ export default function SettingsPage() {
           borderRadius: 14,
           padding: "0.25rem 0.75rem 0.75rem",
           background: "rgba(128,128,128,.05)",
+          // A column with its own gap. The container's children are the tab
+          // strip, the preview card, the settings form and the panels that
+          // submit separately — none of which s-page is spacing any more, since
+          // they are no longer its direct children. Without this the preview
+          // card sat flush against the first settings card.
+          display: "flex",
+          flexDirection: "column",
+          gap: "1rem",
         }}
       >
         <TabStrip active={tab} onSelect={setTab} />

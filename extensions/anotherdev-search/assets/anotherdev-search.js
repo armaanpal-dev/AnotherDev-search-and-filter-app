@@ -748,161 +748,498 @@
   // =======================================================================
   //  2. Faceted results application
   // =======================================================================
-  /* ---- Adding to cart the way the theme does ----------------------------
-   *
-   * The old version POSTed JSON to a hardcoded "/cart/add.js" and then fired
-   * two guessed events. That worked on a plain English-only Dawn store and
-   * quietly failed everywhere else:
-   *
-   *   - a locale-prefixed storefront (/fr/...) needs the localised route, so
-   *     the hardcoded path added to the wrong cart or 404ed;
-   *   - a JSON body carries no form_type, which is the field most cart apps
-   *     and slide-out drawers key off to notice an add;
-   *   - nothing re-rendered the drawer, so the cart bubble stayed stale until
-   *     the shopper navigated.
-   *
-   * So instead of inventing a request, we copy the one the theme already
-   * makes: same route, same form fields, same headers, plus bundled section
-   * rendering so the theme re-renders its own cart markup. */
+  /* ==========================================================================
+     Universal "Add to cart" for result cards.
 
-  /** Locale-aware storefront root: "/" or "/fr/" on a translated store. */
-  function routeRoot() {
-    var r =
-      window.Shopify && window.Shopify.routes && window.Shopify.routes.root;
-    if (!r) return "/";
-    return r.charAt(r.length - 1) === "/" ? r : r + "/";
-  }
+     Ported from the same implementation used by AnotherDev Shoppable Video, so
+     both apps behave identically in a merchant's theme. Goal: behave EXACTLY
+     like the theme's own Add to Cart button — respect the merchant's cart
+     setting (drawer / popup notification / cart page), render the real cart
+     contents, update the bubble, and keep third-party cart apps working.
 
-  /** The theme’s own add-to-cart URL when it publishes one, else the route. */
-  function cartAddUrl() {
-    var themeRoute =
-      (window.routes && window.routes.cart_add_url) ||
-      (window.theme && window.theme.routes && window.theme.routes.cart_add_url) ||
-      (window.Shopify &&
-        window.Shopify.routes &&
-        window.Shopify.routes.cart_add_url);
-    if (themeRoute) {
-      return String(themeRoute).indexOf(".js") > -1 ? themeRoute : themeRoute + ".js";
-    }
-    return routeRoot() + "cart/add.js";
-  }
+     Two rules this section is built around:
 
-  /**
-   * The hidden fields the theme puts in its own product form.
-   *
-   * Shopify itself only needs id and quantity, but form_type and utf8 are what
-   * a third-party cart app looks for to recognise an add as a real product-form
-   * submission. Copying them from the live form means we match whatever this
-   * theme sends, instead of hardcoding Dawn’s answer for every theme.
-   */
-  function themeFormFields() {
-    var out = { form_type: "product", utf8: "✓" };
-    var form = document.querySelector('form[action*="/cart/add"]');
-    if (!form) return out;
-    Array.prototype.forEach.call(
-      form.querySelectorAll('input[type="hidden"]'),
-      function (input) {
-        var name = input.getAttribute("name");
-        // id and quantity are per-product and set by the caller; properties
-        // belong to the product that form was rendered for, not to ours.
-        if (!name || name === "id" || name === "quantity") return;
-        if (name.indexOf("properties[") === 0) return;
-        out[name] = input.value;
-      },
-    );
-    return out;
-  }
+     1. ONCE /cart/add.js RESOLVES, THE ADD IS COMMITTED AND IRREVERSIBLE.
+        Nothing after that point may ever surface as an error — a shopper told
+        "Error" after a successful add will click again and buy two.
 
-  /* Elements that mean "this theme has a cart drawer". Attribute and tag based
-     rather than class based: class names are theme-specific, but a custom
-     element name or an id survives reskinning. */
-  var CART_HOSTS = [
-    "cart-drawer",
-    "cart-notification",
-    "#CartDrawer",
-    "#cart-drawer",
-    "#CartNotification",
-    "[id*='cart-drawer' i]",
-    "[data-cart-drawer]",
-    "#cart-icon-bubble",
-    ".cart-count-bubble",
-    "[data-cart-count]",
-  ];
+     2. THE THEME'S renderContents() IS NOT A BLACK BOX. It half-works: Dawn
+        removes `is-empty` from `.drawer__inner`, but Liquid stamps that class
+        on the <cart-drawer> HOST, so on the 0->1 add the drawer opens with the
+        line items hidden. We hand off to the theme, then repair what it misses.
 
-  /** Section ids of everything on the page that renders cart state, max five. */
-  function cartSectionIds() {
-    var ids = [];
-    CART_HOSTS.forEach(function (sel) {
-      var nodes;
-      try { nodes = document.querySelectorAll(sel); } catch (e) { return; }
-      Array.prototype.forEach.call(nodes, function (node) {
-        var section = node.closest ? node.closest('[id^="shopify-section-"]') : null;
-        if (!section) return;
-        var id = section.id.replace("shopify-section-", "");
-        // Bundled section rendering accepts at most five.
-        if (id && ids.indexOf(id) < 0 && ids.length < 5) ids.push(id);
-      });
-    });
-    return ids;
-  }
+     Tiers (capability detection, never theme-name sniffing):
+       1. NATIVE   — <cart-notification>/<cart-drawer> with renderContents():
+                     which element exists already mirrors cart_type.
+       2. SECTION  — a <cart-drawer> inside a Shopify section but with no
+                     renderContents (Symmetry / Clean Canvas family).
+       3. LEGACY   — the theme's own ajax cart.
+       4. FALLBACK — our own confirmation, so feedback is never absent.
 
-  /**
-   * Swap in the cart markup the server just rendered.
-   *
-   * innerHTML does not run <script> tags, but every modern theme wraps its
-   * drawer in a custom element, and inserting one runs connectedCallback —
-   * which is how the theme rebinds its own behaviour. That is the mechanism
-   * Shopify’s own docs point at, so we do not try to re-run anything ourselves.
-   */
-  function applyCartSections(sections) {
-    if (!sections) return;
-    Object.keys(sections).forEach(function (id) {
-      var html = sections[id];
-      if (typeof html !== "string") return; // a bad id comes back as null
-      var host = document.getElementById("shopify-section-" + id);
-      if (host) host.innerHTML = html;
-    });
-  }
+     Third-party carts (GoKwik, Shiprocket, Rebuy…) patch window.fetch/XHR on
+     /cart/add.js, so using the official endpoint is what keeps them working.
+     ======================================================================== */
 
-  /* Events themes and cart apps listen for. Dispatching the union is safe:
-     a theme that does not know an event simply never hears it, and the cost of
-     one extra CustomEvent is nothing next to a cart that never opens. */
-  var CART_EVENTS = [
-    "cart:refresh",
-    "cart:build",
-    "cart:updated",
-    "cart:added",
-    "cart-drawer:open",
-    "ajaxProduct:added",
-    "product:added-to-cart",
-  ];
+  var CART_TIMEOUT_MS = 15000;
 
-  /** Ask the theme to show its cart, without guessing at class names. */
-  function openThemeCart(detail) {
-    CART_EVENTS.forEach(function (name) {
-      document.dispatchEvent(
-        new CustomEvent(name, { bubbles: true, detail: detail || {} }),
-      );
-    });
-    // Dawn and its forks expose the drawer as a custom element with open().
-    var drawer =
-      document.querySelector("cart-drawer") ||
-      document.querySelector("cart-notification");
-    if (drawer && typeof drawer.open === "function") {
-      try { drawer.open(); return true; } catch (e) { /* fall through */ }
-    }
-    // Otherwise click the theme’s own drawer toggle if it published one. Only
-    // attribute hooks, never an <a href="/cart">: clicking that would navigate
-    // away from the results the shopper is still browsing.
-    var toggle = document.querySelector(
-      "[data-cart-drawer-toggle], [data-drawer-open='cart'], [aria-controls='CartDrawer']",
-    );
-    if (toggle) { toggle.click(); return true; }
-    return false;
-  }
   /** The merchant’s add-to-cart wording, falling back to the default. */
   function addLabel(cfg) {
     return (cfg && cfg.cardButtonLabel) || "Add to cart";
+  }
+
+  /** Variant ids arrive numeric, but a GID would break the Ajax API silently. */
+  function variantIdOf(raw) {
+    if (!raw) return null;
+    return String(raw).split("/").pop();
+  }
+
+  /* Locale/market-aware base path. Stores with multiple markets serve the
+     storefront under a prefix (e.g. "/en-ca/"), where a hardcoded
+     "/cart/add.js" can redirect and silently fail. */
+  function shopRoot() {
+    var root =
+      (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || "/";
+    return root.charAt(root.length - 1) === "/" ? root : root + "/";
+  }
+
+  function shopUrl(path) {
+    return shopRoot() + String(path).replace(/^\//, "");
+  }
+
+  /* A patched fetch (cart apps) can leave a promise pending forever, which
+     would strand the button on "Adding…" until reload. Always time out. */
+  function fetchWithTimeout(url, options) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, CART_TIMEOUT_MS);
+    var opts = Object.assign({}, options || {}, { signal: controller.signal });
+    return fetch(url, opts).finally(function () { clearTimeout(timer); });
+  }
+
+  /* ---- capability detection --------------------------------------------- */
+
+  /* The theme's own cart UI. Which one exists reflects the merchant's setting:
+     <cart-notification> = popup, <cart-drawer> = drawer, neither = cart page. */
+  function findNativeCartUI() {
+    var el =
+      document.querySelector("cart-notification") ||
+      document.querySelector("cart-drawer");
+    if (
+      el &&
+      typeof el.renderContents === "function" &&
+      typeof el.getSectionsToRender === "function"
+    ) {
+      return el;
+    }
+    return null;
+  }
+
+  /* Apps that REPLACE the cart and patch fetch to open their own side cart when
+     they see a /cart/add.js request. When one is present we must NOT also drive
+     the theme's (now-hidden) cart element.
+
+     Over-detecting here is safe: if a "detected" app does not actually open its
+     cart, the verify-then-confirm step below still confirms the add. So we can
+     be generous rather than risk missing one. */
+  function findThirdPartyCart() {
+    var w = window;
+    if (w.gokwik || w.gokwikSdk || w.openGokwikSideCart || w.kwikCartActive) return "gokwik";
+    if (w.shiprocketCheckoutEvents || w.srCustomCheckoutCallBackFn || w.shiprocketCheckoutChannel) return "shiprocket";
+    if (w.Rebuy || w.rebuy) return "rebuy";
+    if (w.swymCart || w._SwymAJAXCart) return "swym";
+    return null;
+  }
+
+  /** Actually rendered on screen (not display:none / zero-size / transparent). */
+  function isVisibleEl(el) {
+    if (!el || !el.isConnected) return false;
+    var rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    var cs = window.getComputedStyle(el);
+    return cs.visibility !== "hidden" && cs.display !== "none" && cs.opacity !== "0";
+  }
+
+  var OPEN_CART_SELECTORS = [
+    "cart-drawer.active", "cart-drawer.animate", "cart-drawer.is-open",
+    "cart-notification.active", "cart-notification[open]",
+    ".drawer.active", ".drawer.is-open", ".cart-drawer.open", ".mini-cart.open",
+    ".ajaxcart-content.open",
+    '[class*="side-cart"]', '[class*="sidecart"]', '[class*="slide-cart"]',
+    '[class*="cart"][class*="open"]', '[class*="cart"][class*="active"]',
+    '[class*="Cart"][class*="visible"]',
+  ];
+
+  /* Is ANY cart drawer / side cart / notification currently open on screen?
+     Used to decide whether we still need our own confirmation — if the store's
+     own cart opened, we stay out of the way. */
+  function anyCartVisible() {
+    for (var i = 0; i < OPEN_CART_SELECTORS.length; i++) {
+      var list;
+      try { list = document.querySelectorAll(OPEN_CART_SELECTORS[i]); } catch (e) { continue; }
+      for (var j = 0; j < list.length; j++) {
+        if (isVisibleEl(list[j])) return true;
+      }
+    }
+    return false;
+  }
+
+  /* ---- confirmation toast (fallback + error surface) --------------------- */
+
+  function toastStyles() {
+    if (document.getElementById("adsf-cart-toast-styles")) return;
+    var s = document.createElement("style");
+    s.id = "adsf-cart-toast-styles";
+    s.textContent =
+      "@keyframes adsf-toast-in{from{opacity:0;transform:translate(-50%,12px)}" +
+      "to{opacity:1;transform:translate(-50%,0)}}";
+    document.head.appendChild(s);
+  }
+
+  function showCartToast(opts) {
+    var ok = opts.ok !== false;
+    var cart = opts.cart || null;
+    toastStyles();
+
+    var existing = document.getElementById("adsf-cart-toast");
+    if (existing) existing.remove();
+
+    var count = (cart && cart.item_count) || 0;
+    var pill =
+      "display:inline-block;padding:8px 14px;border-radius:999px;font-weight:600;" +
+      "font-size:13px;text-decoration:none;white-space:nowrap;line-height:1;";
+
+    var el = document.createElement("div");
+    el.id = "adsf-cart-toast";
+    // Sits above common chat widgets (Intercom/Tidio use ~2147483000+).
+    el.style.cssText =
+      "position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translate(-50%,0);" +
+      "background:#111;color:#fff;border-radius:14px;padding:12px 14px;display:flex;" +
+      "align-items:center;gap:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);" +
+      "font-size:14px;line-height:1.2;max-width:92vw;animation:adsf-toast-in .25s ease;";
+
+    var body = ok
+      ? '<span style="width:20px;height:20px;border-radius:50%;background:#22c55e;color:#fff;' +
+        'display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;">&#10003;</span>' +
+        '<span style="margin-right:4px;">Added to cart' +
+        (count ? " &middot; " + count + " item" + (count > 1 ? "s" : "") : "") + "</span>" +
+        '<a href="' + esc(shopUrl("cart")) + '" style="' + pill + 'background:#fff;color:#111;">View cart</a>' +
+        '<a href="' + esc(shopUrl("checkout")) + '" style="' + pill + 'background:#22c55e;color:#fff;">Checkout</a>'
+      : '<span style="width:20px;height:20px;border-radius:50%;background:#ef4444;color:#fff;' +
+        'display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;">!</span>' +
+        "<span>" + esc(opts.message || "Couldn’t add to cart") + "</span>";
+
+    el.innerHTML =
+      body +
+      '<button type="button" aria-label="Close" style="background:none;border:none;color:#aaa;' +
+      'font-size:18px;cursor:pointer;padding:0 2px;line-height:1;">&times;</button>';
+
+    document.body.appendChild(el);
+
+    // A live region only announces mutations that happen AFTER it is in the
+    // a11y tree — so insert first, then label it.
+    requestAnimationFrame(function () { el.setAttribute("role", "status"); });
+
+    el.querySelector("button").addEventListener("click", function () { el.remove(); });
+
+    // Don't yank links out from under a keyboard/mouse user.
+    var timer = setTimeout(function () { if (el.isConnected) el.remove(); }, 6000);
+    var hold = function () { clearTimeout(timer); };
+    var resume = function () {
+      timer = setTimeout(function () { if (el.isConnected) el.remove(); }, 3000);
+    };
+    el.addEventListener("mouseenter", hold);
+    el.addEventListener("focusin", hold);
+    el.addEventListener("mouseleave", resume);
+    el.addEventListener("focusout", resume);
+  }
+
+  /* ---- cart helpers ------------------------------------------------------ */
+
+  function updateCartBubble(count) {
+    var nodes = document.querySelectorAll(
+      "[data-cart-count], .cart-count, #CartCount, .cart-link__bubble, " +
+      ".header__cart-count, .cart__count, [data-header-cart-count], " +
+      ".cart-count-bubble, #cart-icon-bubble, .Header__CartCount",
+    );
+    Array.prototype.forEach.call(nodes, function (el) {
+      // NEVER clobber an element that wraps markup: Dawn's #cart-icon-bubble
+      // contains the cart <svg>, and .cart-count-bubble holds a visually-hidden
+      // label. textContent on those destroys the header icon / a11y text.
+      if (el.firstElementChild) return;
+      el.textContent = count;
+      if (count > 0) {
+        el.classList.remove("hidden", "hide");
+        el.style.display = "";
+      }
+    });
+  }
+
+  /* Ask themes/apps to re-read the cart. Refresh signals only — none of these
+     can cause another add. Because we add via a direct fetch (bypassing the
+     theme's own add-to-cart code), the theme does not know the cart changed, so
+     we fire the events themes actually listen for. */
+  function broadcastCartUpdate(cart) {
+    ["cart:refresh", "cart:updated", "cart:build", "ajaxProduct:added"].forEach(function (name) {
+      document.documentElement.dispatchEvent(
+        new CustomEvent(name, { bubbles: true, detail: { cart: cart } }),
+      );
+    });
+    // Clean Canvas namespace (Symmetry, Expanse, Impulse, Prestige, Streamline…)
+    // — their drawer's updateFromCartChange listens for these to re-render.
+    ["on:cart:add", "on:cart:after-merge"].forEach(function (name) {
+      document.dispatchEvent(new CustomEvent(name, { bubbles: true, detail: { cart: cart } }));
+    });
+    if (typeof window.jQuery !== "undefined") {
+      try {
+        window.jQuery(document).trigger("cart.requestComplete", [cart]);
+      } catch (e) {
+        // A theme's jQuery handler throwing must not fail the add.
+      }
+    }
+  }
+
+  function postAdd(payload) {
+    return fetchWithTimeout(shopUrl("cart/add.js"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok) {
+          // Shopify explains WHY (sold out, quantity rules) — surface it.
+          throw new Error(data.description || data.message || "Couldn’t add to cart");
+        }
+        return data;
+      });
+    });
+  }
+
+  function getCart() {
+    return fetchWithTimeout(shopUrl("cart.js"), { headers: { Accept: "application/json" } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .catch(function () { return null; }); // presentation only — never fail the add
+  }
+
+  /* Dawn's renderContents() removes `is-empty` from `.drawer__inner`, but the
+     class is stamped on the <cart-drawer> HOST — so on the first add (0->1) the
+     drawer opens with the line items hidden by CSS. Forks vary in where they put
+     it, so clear it wherever it actually lives. Idempotent and harmless. */
+  function clearEmptyState(cartUI) {
+    try {
+      cartUI.classList.remove("is-empty");
+      Array.prototype.forEach.call(cartUI.querySelectorAll(".is-empty"), function (el) {
+        el.classList.remove("is-empty");
+      });
+      var host = cartUI.closest(".drawer, .cart-drawer");
+      if (host) host.classList.remove("is-empty");
+    } catch (e) {
+      // Best-effort repair of the theme's own empty-state class.
+    }
+  }
+
+  /* Reveal the theme's own cart drawer by clicking its cart icon — themes with
+     a JS drawer intercept this so it opens in place. Only called once we have
+     populated the drawer, and only when a drawer element exists, so it will not
+     navigate on a page-cart theme. */
+  function openThemeDrawer() {
+    var link = document.querySelector(
+      'a[href$="/cart"]:not([href*="checkout"]), a[href*="/cart?"]:not([href*="checkout"])',
+    );
+    if (link) setTimeout(function () { link.click(); }, 60);
+  }
+
+  /* Section-rendered cart drawers (Symmetry / Clean Canvas and other OS-2.0
+     themes) do not expose Dawn's renderContents(), but their drawer lives in a
+     Shopify section. So we add with that section requested, get its freshly
+     rendered HTML back, inject it into the live drawer, then open it. The
+     section id is read from the DOM, so this adapts to any theme. */
+  function addViaSectionDrawer(variantId, drawerEl) {
+    var section = drawerEl.closest('[id^="shopify-section-"]');
+    if (!section) return Promise.resolve({ added: false, handled: false });
+    var sectionId = section.id.replace("shopify-section-", "");
+
+    return postAdd({
+      id: variantId,
+      quantity: 1,
+      sections: [sectionId],
+      sections_url: window.location.pathname,
+    }).then(function (data) {
+      // ===== COMMITTED from here: item is added; never throw =====
+      var html = data && data.sections && data.sections[sectionId];
+      if (!html) return { added: true, handled: false };
+      try {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.querySelector("cart-drawer") || doc.querySelector("cart-notification");
+        if (fresh) drawerEl.innerHTML = fresh.innerHTML;
+        else section.innerHTML = html;
+        clearEmptyState(drawerEl);
+        getCart().then(function (c) { if (c) broadcastCartUpdate(c); });
+        openThemeDrawer();
+      } catch (e) {
+        showCartToast({ ok: true });
+      }
+      return { added: true, handled: true };
+    });
+  }
+
+  /* Open the theme's own ajax cart, ONLY when we can populate it ourselves.
+
+     We deliberately do NOT blindly click a theme's cart trigger: many themes
+     build their drawer from section HTML their OWN add-to-cart fetched, which
+     we cannot reproduce from cart JSON — so opening it shows an EMPTY drawer.
+     An empty drawer reads as broken; our "Added to cart" confirmation does not.
+     Anything we cannot populate falls through to the toast. */
+  function openLegacyDrawer() {
+    var marmetoCart = document.querySelector(".ajaxcart-content");
+    if (!marmetoCart) return false;
+
+    marmetoCart.setAttribute("open", "");
+    marmetoCart.classList.add("open");
+    var overlay = document.querySelector(".ajaxcart-overlay");
+    if (overlay) overlay.classList.add("open");
+
+    fetchWithTimeout(shopUrl("cart?view=ajax"))
+      .then(function (res) { return res.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.querySelector(".ajaxcart-container, ajax-cart");
+        var container = marmetoCart.querySelector(".ajaxcart-container, .ajax-cart");
+        if (fresh && container) container.innerHTML = fresh.innerHTML;
+      })
+      .catch(function () {});
+    return true;
+  }
+
+  /* ---- the button -------------------------------------------------------- */
+
+  /* Serialise adds across ALL buttons. Without this, two concurrent adds race
+     and the later-rendered (stale) sections can paint a drawer showing qty 1
+     while the cart actually holds 2. */
+  var cartAddInFlight = false;
+
+  /**
+   * Add the button's variant, then present the result the way this theme does.
+   *
+   * `onAdded` is called only after a genuinely successful add, so analytics
+   * never counts a sold-out failure as an add-to-cart.
+   */
+  function addToCartFromButton(button, cfg, onAdded) {
+    if (!button || cartAddInFlight) return;
+
+    var variantId = variantIdOf(button.getAttribute("data-adsf-add"));
+    if (!variantId) {
+      showCartToast({ ok: false, message: "This product is unavailable" });
+      return;
+    }
+
+    cartAddInFlight = true;
+    var label = addLabel(cfg);
+    button.disabled = true;
+    button.textContent = "Adding…";
+
+    function done(text) {
+      button.textContent = text;
+      cartAddInFlight = false;
+      setTimeout(function () {
+        button.disabled = false;
+        button.textContent = label;
+      }, 2000);
+    }
+
+    // A cart app that patches fetch owns the cart — we must not also drive the
+    // theme's now-hidden cart element.
+    var thirdParty = findThirdPartyCart();
+    // Only elements that actually implement renderContents count: a custom
+    // theme can expose a <cart-drawer> with no such method.
+    var cartUI = thirdParty ? null : findNativeCartUI();
+
+    /* ---- NATIVE: fetch with sections, theme renders and opens ------------ */
+    if (cartUI) {
+      // Single-item shape on purpose: the response is the LINE ITEM (with
+      // `key`/`id`) plus `sections`, which is what renderContents() expects. An
+      // {items:[…]} payload has no top-level `key` and throws.
+      postAdd({
+        id: variantId,
+        quantity: 1,
+        sections: cartUI.getSectionsToRender().map(function (s) { return s.id; }),
+        sections_url: window.location.pathname,
+      })
+        .then(function (data) {
+          // ===== COMMITTED: presentation only from here, never throw =====
+          try {
+            cartUI.renderContents(data); // theme re-renders its sections AND opens
+            clearEmptyState(cartUI);     // repair the 0->1 empty-drawer bug
+          } catch (renderErr) {
+            showCartToast({ ok: true }); // theme threw, but the item IS added
+          }
+          getCart().then(function (cart) { if (cart) broadcastCartUpdate(cart); });
+          if (onAdded) onAdded();
+          done("Added");
+        })
+        .catch(function (err) { failed(err); });
+      return;
+    }
+
+    /* ---- SECTION-RENDERED DRAWER (Symmetry / Clean Canvas etc.) ---------- */
+    var drawerEl = thirdParty ? null : document.querySelector("cart-drawer");
+    var sectionFirst =
+      drawerEl && drawerEl.closest('[id^="shopify-section-"]')
+        ? addViaSectionDrawer(variantId, drawerEl)
+        : Promise.resolve({ added: false, handled: false });
+
+    sectionFirst
+      .then(function (res) {
+        if (res.handled || res.added) return res;
+        /* ---- EVERYTHING ELSE: add, then VERIFY a cart actually opened ---- */
+        // The fetch itself triggers any fetch-patching cart app to open its own
+        // side cart. Then we check: if nothing is visibly open, we confirm with
+        // our own toast. "Verify, don't assume" is what makes unknown themes
+        // degrade gracefully — and we never navigate away from the results.
+        return postAdd({ id: variantId, quantity: 1 }).then(function () {
+          return { added: true, handled: false };
+        });
+      })
+      // ===== COMMITTED past this point: presentation only, never throw =====
+      .then(function (res) {
+        if (res.handled) {
+          if (onAdded) onAdded();
+          done("Added");
+          return;
+        }
+        return getCart().then(function (cart) {
+          try {
+            if (cart) {
+              updateCartBubble(cart.item_count);
+              broadcastCartUpdate(cart);
+            }
+            var handedOff = thirdParty ? true : openLegacyDrawer();
+            setTimeout(function () {
+              if (!handedOff && !anyCartVisible()) {
+                showCartToast({ ok: true, cart: cart });
+              }
+            }, 800);
+          } catch (presentErr) {
+            // Already in the cart; a presentation hiccup must not read as error.
+          }
+          if (onAdded) onAdded();
+          done("Added");
+        });
+      })
+      .catch(function (err) { failed(err); });
+
+    /* Only reachable while the add itself failed. */
+    function failed(err) {
+      // A variant with a quantity rule (B2B minimums, increments) can never be
+      // satisfied by a fixed quantity:1 add, and the Ajax API does not expose
+      // the rule — so send the shopper to the product page, where the theme's
+      // own quantity selector enforces it. Nothing was added, so this is safe.
+      var handle = button.getAttribute("data-adsf-handle");
+      if (handle && /quantity|minimum|increment/i.test(String(err && err.message))) {
+        window.location.href = shopUrl("products/" + handle);
+        return;
+      }
+      showCartToast({ ok: false, message: err && err.message });
+      done("Unavailable");
+    }
   }
 
   function initResultsApp(root, globalCfg) {
@@ -1053,7 +1390,7 @@
     function card(p) {
       var canQuickAdd = cfg.quickAdd && p.available && p.variantCount === 1 && p.variantId;
       return '<article class="adsf-card' + (p.pinned ? " adsf-card--pinned" : "") + '">' +
-        '<a href="/products/' + esc(p.handle) + '" data-adsf-hit="' + esc(p.productId) + '">' +
+        '<a href="' + esc(shopUrl("products/" + p.handle)) + '" data-adsf-hit="' + esc(p.productId) + '">' +
         (p.imageUrl
           ? '<img class="adsf-card__img" src="' + esc(p.imageUrl) + '" alt="' + esc(p.imageAlt || p.title) + '" loading="lazy" width="300" height="300">'
           : '<span class="adsf-card__noimg"></span>') +
@@ -1066,7 +1403,8 @@
           ? '<button type="button" class="adsf-card__add' +
             (cfg.cardButtonFullWidth === false ? "" : " adsf-card__add--full") +
             '" data-adsf-add="' + esc(p.variantId) +
-            '" data-adsf-add-product="' + esc(p.productId) + '">' +
+            '" data-adsf-add-product="' + esc(p.productId) +
+            '" data-adsf-handle="' + esc(p.handle) + '">' +
             esc(addLabel(cfg)) + "</button>"
           : "") +
         "</article>";
@@ -1080,49 +1418,11 @@
     function bindQuickAdd() {
       Array.prototype.forEach.call(grid.querySelectorAll("[data-adsf-add]"), function (btn) {
         btn.addEventListener("click", function () {
-          var id = btn.getAttribute("data-adsf-add");
-          btn.disabled = true;
-          btn.textContent = "Adding…";
-
-          // Built as FormData, not JSON, because this is the shape a product
-          // form submits and the shape cart apps recognise.
-          var body = new FormData();
-          var fields = themeFormFields();
-          Object.keys(fields).forEach(function (k) { body.append(k, fields[k]); });
-          body.append("id", id);
-          body.append("quantity", "1");
-
-          // Ask the server to re-render the theme’s own cart markup in the same
-          // round trip, so the drawer and the count bubble are correct the
-          // moment we open them.
-          var sections = cartSectionIds();
-          if (sections.length) {
-            body.append("sections", sections.join(","));
-            body.append("sections_url", location.pathname + location.search);
-          }
-
-          fetch(cartAddUrl(), {
-            method: "POST",
-            // No Content-Type: the browser must set the multipart boundary.
-            // X-Requested-With is what several cart apps sniff for an AJAX add.
-            headers: {
-              Accept: "application/javascript",
-              "X-Requested-With": "XMLHttpRequest",
-            },
-            body: body,
-          })
-            .then(function (r) { if (!r.ok) throw new Error("add failed"); return r.json(); })
-            .then(function (data) {
-              btn.textContent = "Added";
-              track(cfg.proxy, "add_to_cart", state.term, btn.getAttribute("data-adsf-add-product"));
-              applyCartSections(data && data.sections);
-              openThemeCart({ id: id, quantity: 1, source: "anotherdev-search" });
-              setTimeout(function () { btn.disabled = false; btn.textContent = addLabel(cfg); }, 2500);
-            })
-            .catch(function () {
-              btn.textContent = "Unavailable";
-              setTimeout(function () { btn.disabled = false; btn.textContent = addLabel(cfg); }, 2500);
-            });
+          // Bound per button rather than delegated because the grid replaces its
+          // buttons on every render, so there is nothing to leak.
+          addToCartFromButton(btn, cfg, function () {
+            track(cfg.proxy, "add_to_cart", state.term, btn.getAttribute("data-adsf-add-product"));
+          });
         });
       });
     }
@@ -1525,6 +1825,18 @@
     }
     if (filterToggle) filterToggle.addEventListener("click", function () { openDrawer(!facetsPanel.classList.contains("is-open")); });
     if (backdrop) backdrop.addEventListener("click", function () { openDrawer(false); });
+    var facetsClose = facetsPanel.querySelector("[data-adsf-facets-close]");
+    if (facetsClose) facetsClose.addEventListener("click", function () { openDrawer(false); });
+    // The backdrop already closes the drawer, but it only exists while the
+    // drawer is open and it does not cover a theme header pinned above it.
+    // This catches every other outside click.
+    document.addEventListener("click", function (e) {
+      if (!facetsPanel.classList.contains("is-open")) return;
+      var t = e.target && e.target.nodeType === 1 ? e.target : null;
+      if (!t || facetsPanel.contains(t)) return;
+      if (filterToggle && filterToggle.contains(t)) return;
+      openDrawer(false);
+    });
 
     // Keyboard users must be able to leave the drawer, and must not tab out of
     // it into the page behind while it is covering the screen.
@@ -2117,7 +2429,7 @@
       "</div>" +
       '<div class="adsf-app__chips" data-adsf-chips></div>' +
       '<aside class="adsf-facets" data-adsf-facets aria-label="Filters">' +
-      '<div class="adsf-facets__heading">Filters</div>' +
+      '<div class="adsf-facets__head"><span class="adsf-facets__heading">Filters</span><button type="button" class="adsf-facets__close" data-adsf-facets-close aria-label="Close filters">&times;</button></div>' +
       '<div class="adsf-facets__inner" data-adsf-facets-inner></div></aside>';
     // Mounted inside the theme's page container, next to the grid, so it
     // inherits page width and padding. Inserting before the whole section
@@ -2414,6 +2726,16 @@
         openDrawer(!facetsEl.classList.contains("is-open"));
       });
       backdrop.addEventListener("click", function () { openDrawer(false); });
+      var facetsClose = facetsEl.querySelector("[data-adsf-facets-close]");
+      if (facetsClose) {
+        facetsClose.addEventListener("click", function () { openDrawer(false); });
+      }
+      document.addEventListener("click", function (e) {
+        if (!facetsEl.classList.contains("is-open")) return;
+        var t = e.target && e.target.nodeType === 1 ? e.target : null;
+        if (!t || facetsEl.contains(t) || toggle.contains(t)) return;
+        openDrawer(false);
+      });
 
       facetsEl.addEventListener("keydown", function (e) {
         if (!facetsEl.classList.contains("is-open")) return;
@@ -2699,7 +3021,7 @@
     '<div class="adsf-app__chips" data-adsf-chips></div>',
     '<div class="adsf-app__body">',
     '  <aside class="adsf-facets" data-adsf-facets aria-label="Filters">',
-    '    <div class="adsf-facets__heading">Filters</div>',
+    '    <div class="adsf-facets__head"><span class="adsf-facets__heading">Filters</span><button type="button" class="adsf-facets__close" data-adsf-facets-close aria-label="Close filters">&times;</button></div>',
     '    <div class="adsf-facets__inner" data-adsf-facets-inner></div>',
     '  </aside>',
     '  <div class="adsf-app__main">',

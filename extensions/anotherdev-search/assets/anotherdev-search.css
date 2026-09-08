@@ -172,7 +172,21 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-app--filters-sidebar .adsf-app__main { grid-column: 2; grid-row: 3; }
 
 /* Sidebar title, on the same line as the count and the sort control. */
-.adsf-facets__heading { display: none; }
+/* The sidebar title, and the drawer’s own title bar. Hidden by default and
+   shown where there is something to title: a filter column, or an open
+   drawer that otherwise had no heading and no way out but the backdrop. */
+.adsf-facets__head {
+  display: none; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.adsf-app--filters-sidebar .adsf-facets__head,
+.adsf-facets.is-open .adsf-facets__head { display: flex; }
+.adsf-facets__close {
+  display: none; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 1.5em; line-height: 1; padding: 0 0.25rem;
+  color: inherit; opacity: 0.6;
+}
+.adsf-facets__close:hover { opacity: 1; }
+.adsf-facets.is-open .adsf-facets__close { display: inline-flex; }
 .adsf-app--filters-sidebar .adsf-facets__heading {
   display: block;
   padding: 0.5rem 0 1rem;
@@ -187,19 +201,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   padding-bottom: 0.65rem;
 }
 .adsf-app--filters-sidebar .adsf-facets__inner { gap: 0.85rem; }
-.adsf-app--filters-sidebar .adsf-facet__toggle {
-  padding: 0.35rem 0.5rem;
-  border-radius: var(--adsf-filter-radius, 0);
-  background: var(--adsf-filter-bg, none);
-  color: var(--adsf-filter-text, inherit);
-}
-.adsf-app--filters-sidebar .adsf-facet__toggle:hover {
-  background: var(--adsf-filter-hover-bg, var(--adsf-filter-bg, none));
-  color: var(--adsf-filter-hover-text, var(--adsf-filter-text, inherit));
-}
-.adsf-app--filters-sidebar .adsf-facet__toggle[aria-expanded="true"] {
-  color: var(--adsf-filter-active-bg, var(--adsf-accent, inherit));
-}
+/* Colours now come from the base .adsf-facet__toggle rule, for every layout. */
 
 .adsf-facets__inner { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1.4rem; }
 .adsf-facet__title { margin: 0 0 0.5rem; font: inherit; }
@@ -334,7 +336,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   grid-column: 2; grid-row: 2;
 }
 /* Sidebar title, sitting on the same line as the product count and sort. */
-.adsf-facets__heading { display: none; }
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-facets__head { display: flex; }
 .adsf-app--filters-sidebar.adsf-themegrid .adsf-facets__heading {
   display: block;
   padding: 0 0 1rem;
@@ -546,7 +548,9 @@ body.adsf-collection-active .collection__filters { display: none !important; }
     grid-column: auto; grid-row: auto;
   }
   .adsf-app--filters-sidebar .adsf-app__body { display: grid; }
-  .adsf-app--filters-sidebar .adsf-facets__heading { display: none; }
+  /* On a phone the column becomes a drawer, and the drawer supplies its own
+     title bar through .is-open — so the static sidebar title must go. */
+  .adsf-app--filters-sidebar .adsf-facets__head { display: none; }
 
   /* Whatever the merchant chose, a phone gets the drawer. */
   .adsf-app__body,
@@ -586,8 +590,21 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 /* ---- Collapsible facet headers ---- */
 .adsf-facet__toggle {
   display: flex; align-items: center; justify-content: space-between; width: 100%;
-  background: none; border: 0; padding: 0; font: inherit; font-weight: 600;
-  cursor: pointer; color: inherit; text-align: left;
+  border: 0; padding: 0.35rem 0.5rem; font: inherit; font-weight: 600;
+  cursor: pointer; text-align: left;
+  /* Every layout paints from the merchant’s filter settings. These used to
+     be applied per-layout, so choosing anything other than the sidebar left
+     the appearance controls doing nothing. */
+  border-radius: var(--adsf-filter-radius, 0);
+  background: var(--adsf-filter-bg, none);
+  color: var(--adsf-filter-text, inherit);
+}
+.adsf-facet__toggle:hover {
+  background: var(--adsf-filter-hover-bg, var(--adsf-filter-bg, none));
+  color: var(--adsf-filter-hover-text, var(--adsf-filter-text, inherit));
+}
+.adsf-facet__toggle[aria-expanded="true"] {
+  color: var(--adsf-filter-active-bg, var(--adsf-accent, inherit));
 }
 .adsf-facet__toggle::after {
   content: ""; width: 8px; height: 8px; margin-left: 0.5rem; flex: none;
