@@ -1280,20 +1280,34 @@
         apply(true);
       });
 
-      var applyBtn = el("button", "adsf-facet__apply", "Go");
-      applyBtn.type = "button";
-      applyBtn.addEventListener("click", function () {
-        state.priceMin = min.value || null;
-        state.priceMax = max.value || null;
+      // "change" rather than "input": it fires on blur and on Enter, so a
+      // half-typed number never triggers a request, and the merchant never
+      // needed a button to say "I meant it".
+      function commitRange() {
+        var nextMin = min.value || null;
+        var nextMax = max.value || null;
+        if (nextMin === state.priceMin && nextMax === state.priceMax) return;
+        state.priceMin = nextMin;
+        state.priceMax = nextMax;
         state.page = 1;
         apply(true);
-      });
+      }
+      min.addEventListener("change", commitRange);
+      max.addEventListener("change", commitRange);
+      // Enter inside a number field submits the surrounding form in some
+      // themes, which would reload the page and lose the filter state.
+      function onKey(e) {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        commitRange();
+      }
+      min.addEventListener("keydown", onKey);
+      max.addEventListener("keydown", onKey);
 
       var row = el("div", "adsf-facet__rangerow");
       row.appendChild(min);
       row.appendChild(el("span", "adsf-facet__dash", "–"));
       row.appendChild(max);
-      row.appendChild(applyBtn);
       wrap.appendChild(row);
       if (hi > lo) wrap.appendChild(slider);
       return wrap;
@@ -2162,16 +2176,27 @@
           var max = el("input", "adsf-facet__num"); max.type = "number";
           max.placeholder = fct.max != null ? String(Math.ceil(fct.max)) : "Max";
           max.value = state.priceMax || "";
-          var go = el("button", "adsf-facet__apply", "Apply"); go.type = "button";
-          go.addEventListener("click", function () {
-            state.priceMin = min.value || null;
-            state.priceMax = max.value || null;
+          // Same rule as the app grid: commit on change, no Apply button.
+          function commitRange() {
+            var nextMin = min.value || null;
+            var nextMax = max.value || null;
+            if (nextMin === state.priceMin && nextMax === state.priceMax) return;
+            state.priceMin = nextMin;
+            state.priceMax = nextMax;
             renderTheme();
-          });
+          }
+          min.addEventListener("change", commitRange);
+          max.addEventListener("change", commitRange);
+          function onKey(e) {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            commitRange();
+          }
+          min.addEventListener("keydown", onKey);
+          max.addEventListener("keydown", onKey);
           rw.appendChild(min);
           rw.appendChild(el("span", "adsf-facet__dash", "to"));
           rw.appendChild(max);
-          rw.appendChild(go);
           pop.appendChild(rw);
         } else {
           var list = el("ul", "adsf-facet__list");

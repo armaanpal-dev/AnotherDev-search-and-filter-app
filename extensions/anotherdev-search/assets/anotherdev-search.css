@@ -162,7 +162,6 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); display: inline-block; }
 .adsf-facet__range { display: flex; align-items: center; gap: 0.4rem; }
 .adsf-facet__num { width: 72px; padding: 0.35rem 0.4rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; font: inherit; }
-.adsf-facet__apply { padding: 0.35rem 0.6rem; border: 0; border-radius: 6px; background: var(--adsf-accent, #111); color: #fff; cursor: pointer; }
 
 .adsf-grid { display: grid; grid-template-columns: repeat(var(--adsf-cols, 4), 1fr); gap: var(--adsf-card-gap, 1.25rem); min-height: 300px; align-items: stretch; }
 .adsf-grid[aria-busy="true"] { opacity: 0.5; }
@@ -271,14 +270,31 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   position: static; display: block; min-width: 0; max-height: none;
   border: 0; box-shadow: none; padding: 0.35rem 0 0.75rem; background: none;
 }
+/* A sidebar row is laid out differently from a pill in a toolbar, but it is
+   still the merchant’s button: only the LAYOUT is overridden here, and every
+   colour and radius still comes from the settings. Hardcoding
+   `background: none` here beat both the base rule and .is-active on
+   specificity, which is why filter appearance appeared to do nothing. */
 .adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn,
 .adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn {
   width: 100%; justify-content: space-between;
-  border: 0; border-radius: 0; padding: 0.35rem 0;
-  background: none; font-weight: 600;
+  border: 0; font-weight: 600;
+  /* Enough padding that a merchant-set background reads as a surface rather
+     than as text with a coloured halo; small enough to still look flush. */
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--adsf-filter-radius, 0);
+  background: var(--adsf-filter-bg, none);
+  color: var(--adsf-filter-text, inherit);
+}
+.adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn.is-active,
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn.is-active {
+  background: var(--adsf-filter-active-bg, var(--adsf-accent, #111));
+  color: var(--adsf-filter-active-text, #fff);
 }
 .adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd__btn:hover,
-.adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn:hover { background: none; }
+.adsf-app--filters-inline.adsf-themegrid .adsf-fdd__btn:hover {
+  background: var(--adsf-filter-hover-bg, var(--adsf-filter-bg, none));
+}
 .adsf-app--filters-sidebar.adsf-themegrid .adsf-fdd,
 .adsf-app--filters-inline.adsf-themegrid .adsf-fdd {
   border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);

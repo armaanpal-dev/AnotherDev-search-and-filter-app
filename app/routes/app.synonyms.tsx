@@ -7,7 +7,7 @@ import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { suggestSynonyms, csvCell } from "../lib/analytics.server";
-import { Stat, Card, Row, Empty, TILES, CARDS } from "../components/ui";
+import { Stat, Card, Row, Empty, TILES, CARDS, useSaveToast } from "../components/ui";
 
 /** A shop cannot have unlimited rules: every one is another OR group in the
  *  tsquery, and config.server only loads the first 2000 anyway. */
@@ -188,6 +188,7 @@ function parseCsvLine(line: string): string[] {
 export default function SynonymsPage() {
   const { synonyms, suggestions } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  useSaveToast(fetcher, "Synonyms saved");
   const [sp] = useSearchParams();
   const prefill = sp.get("prefill") ?? "";
   const multi = synonyms.filter((s) => s.type !== "oneway").length;

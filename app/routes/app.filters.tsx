@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
-import { Stat, Row, Empty, TILES } from "../components/ui";
+import { Stat, Row, Empty, TILES, useSaveToast } from "../components/ui";
 
 /** How a facet may be rendered. Anything else is a typo, not a choice. */
 const DISPLAY_AS = ["checkbox", "swatch", "list", "range"] as const;
@@ -203,6 +203,7 @@ export default function FiltersPage() {
   const { filters, presets, discoveredOptions, discoveredMetafields, everSynced } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  useSaveToast(fetcher, "Filters saved");
   const found = [...discoveredOptions, ...discoveredMetafields];
   const on = filters.filter((f) => f.enabled).length;
   const error = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;

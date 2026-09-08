@@ -8,7 +8,7 @@ import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { csvCell } from "../lib/analytics.server";
-import { Row, Empty, Card } from "../components/ui";
+import { Row, Empty, Card, useSaveToast } from "../components/ui";
 
 const ids = (v: FormDataEntryValue | null) =>
   String(v || "")
@@ -262,6 +262,7 @@ type LoadedRule = ReturnType<typeof useLoaderData<typeof loader>>["rules"][numbe
 export default function MerchandisingPage() {
   const { rules, redirects, isPro, optionNames } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  useSaveToast(fetcher, "Merchandising saved");
   const [sp] = useSearchParams();
   const [editing, setEditing] = useState<string | null>(null);
   const data = fetcher.data;

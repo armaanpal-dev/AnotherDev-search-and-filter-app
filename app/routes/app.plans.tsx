@@ -9,7 +9,7 @@ import prisma from "../db.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getShopByDomain } from "../lib/shop.server";
 import { isOperatorShop } from "../lib/operator.server";
-import { Stat, TILES, WIDE } from "../components/ui";
+import { Stat, TILES, WIDE, useSaveToast } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, session } = await authenticate.admin(request);
@@ -132,6 +132,7 @@ export default function PlansPage() {
   const { plan, overridden, productCount, declined, semantic, isOperator, currentOverride } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  useSaveToast(fetcher, "Plan updated");
   const busy = fetcher.state !== "idle";
   const current = PLAN_LIMITS[plan];
   const overLimit = productCount > current.productLimit;

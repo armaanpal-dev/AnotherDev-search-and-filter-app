@@ -5,6 +5,7 @@
 // no raw elements and no inline styles, which is what previously produced
 // one-off spacing hacks like `style={{ marginInlineStart: "auto" }}`.
 
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 /** Responsive column templates. Tiles wrap on their own, without media queries. */
@@ -154,4 +155,43 @@ export function Bar({ label, value, max, suffix }: { label: string; value: numbe
       </s-text>
     </s-grid>
   );
+}
+
+/**
+ * Announce the result of a fetcher submission as an App Bridge toast.
+ *
+ * Every page in this admin saves through a fetcher and answers with either
+ * `{ ok: true }` or `{ error }`, so one hook covers all of them and no page
+ * has to grow its own banner. A toast rather than a banner because a save can
+ * happen while the merchant is scrolled somewhere else on a long form — a
+ * banner at the top of the page is feedback they never see.
+ *
+ * Keyed on the identity of `fetcher.data`, which React Router replaces on each
+ * submission: `state === "idle" && data` alone would re-announce the last save
+ * on every unrelated re-render.
+ */
+export function useSaveToast(
+  fetcher: { state: string; data?: unknown },
+  message = "Saved",
+) {
+  const announced = useRef<unknown>(null);
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (fetcher.data === announced.current) return;
+    announced.current = fetcher.data;
+
+    // App Bridge publishes this on window once its script has loaded. Guarded
+    // rather than assumed so a non-embedded render (a test, a local page)
+    // degrades to silence instead of throwing.
+    const bridge = (globalThis as { shopify?: { toast?: { show: (m: string, o?: object) => void } } })
+      .shopify;
+    if (!bridge?.toast) return;
+
+    const data = fetcher.data as { ok?: boolean; error?: unknown };
+    if (data.error) {
+      bridge.toast.show(String(data.error), { isError: true, duration: 5000 });
+    } else if (data.ok) {
+      bridge.toast.show(message);
+    }
+  }, [fetcher.state, fetcher.data, message]);
 }

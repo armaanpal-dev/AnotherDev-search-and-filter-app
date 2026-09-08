@@ -4,6 +4,7 @@ import { useLoaderData, useFetcher, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { useSaveToast } from "../components/ui";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { runFullSync, isSyncRunning } from "../lib/sync/bulk.server";
 import { getPlanStatus } from "../lib/billing.server";
@@ -45,7 +46,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.error("Full sync failed:", e);
   });
 
-  return { started: true, alreadyRunning: false };
+  // ok drives the app-wide save toast. The alreadyRunning branch deliberately
+  // does not set it: that path already has its own banner, and a "Sync started"
+  // toast would be a lie.
+  return { started: true, alreadyRunning: false, ok: true };
 };
 
 function phaseTitle(phase: string, active: boolean): string {
@@ -59,6 +63,7 @@ function phaseTitle(phase: string, active: boolean): string {
 export default function SyncPage() {
   const data = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  useSaveToast(fetcher, "Sync started");
   const revalidator = useRevalidator();
 
   const running = data.status === "running";

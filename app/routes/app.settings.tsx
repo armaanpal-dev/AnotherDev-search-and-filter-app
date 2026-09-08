@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
 import { Prisma } from "@prisma/client";
@@ -12,7 +13,7 @@ import { semanticReady } from "../lib/search/embeddings.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { SEARCH_LANGUAGES, toTsConfig } from "../lib/search/languages";
 import { ensureWebPixel, removeWebPixel, getPixelState } from "../lib/pixel.server";
-import { TILES } from "../components/ui";
+import { TILES, useSaveToast } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing, admin } = await authenticate.admin(request);
@@ -159,6 +160,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { ok: true };
 };
 
+type TabKey = "search" | "filters" | "cards" | "advanced";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "search", label: "Search" },
+  { key: "filters", label: "Filters" },
+  { key: "cards", label: "Product cards" },
+  { key: "advanced", label: "Advanced" },
+];
+
+const PREVIEW_HEADING: Record<TabKey, string> = {
+  search: "Search preview",
+  filters: "Filter preview",
+  cards: "Product card preview",
+  advanced: "",
+};
+
+/**
+ * One tab’s worth of sections, hidden rather than unmounted.
+ *
+ * `display: none` on a wrapper, not the `hidden` attribute: these are custom
+ * elements that set their own display, which would beat the browser’s
+ * `[hidden] { display: none }` rule.
+ */
+function Panel({ show, children }: { show: boolean; children: ReactNode }) {
+  return (
+    <div style={{ display: show ? "block" : "none" }}>
+      <s-stack direction="block" gap="large-500">{children}</s-stack>
+    </div>
+  );
+}
+
 /** "royal blue = #4169e1" per line — the least fiddly way to type a colour map. */
 function parseSwatchText(text?: string): Record<string, string> | undefined {
   if (text == null) return undefined;
@@ -186,9 +218,16 @@ export default function SettingsPage() {
   const pixelFetcher = useFetcher<typeof action>();
   const s = settings;
   const busy = fetcher.state !== "idle";
-  // Only after a completed submit: fetcher.data survives, so checking it alone
-  // would leave the banner up while a second save is in flight.
-  const saved = fetcher.state === "idle" && Boolean(fetcher.data?.ok);
+  useSaveToast(fetcher, "Settings saved");
+  useSaveToast(pixelFetcher, "Revenue tracking updated");
+
+  /* Four tabs rather than eleven stacked cards. Every panel stays MOUNTED and
+     is hidden with CSS: unmounting one would drop its inputs from the form,
+     so edits made on one tab would be silently lost by a save made on
+     another. The cost is a slightly larger DOM, which is nothing next to
+     losing a merchant’s work. */
+  const [tab, setTab] = useState<TabKey>("search");
+
   const error =
     (fetcher.data && "error" in fetcher.data && fetcher.data.error) ||
     (pixelFetcher.data && "error" in pixelFetcher.data && pixelFetcher.data.error) ||
@@ -252,15 +291,6 @@ export default function SettingsPage() {
 
       {error && <s-banner tone="critical">{String(error)}</s-banner>}
 
-      {saved && (
-        <s-banner tone="success" heading="Settings saved" dismissible>
-          <s-paragraph>
-            Your storefront picks these up within about 30 seconds, because the
-            widget caches settings briefly.
-          </s-paragraph>
-        </s-banner>
-      )}
-
       <s-section heading="Currently live">
         <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Live label="Instant search" on={s.autoAttach} />
@@ -273,23 +303,42 @@ export default function SettingsPage() {
         <s-text color="subdued">Storefront: {domain}</s-text>
       </s-section>
 
-      {/* The preview sits above the form so it stays in view while the controls
-          below it are edited. */}
-      <s-section heading="Preview">
-        <s-paragraph>
-          <s-text color="subdued">
-            This is your search, drawn with the settings below. It updates as you
-            edit — nothing is saved until you press Save.
-          </s-text>
-        </s-paragraph>
-        <WidgetPreview settings={draft} />
+      <s-section>
+        <s-button-group gap="base">
+          {TABS.map((t) => (
+            <s-button
+              key={t.key}
+              variant={tab === t.key ? "primary" : "tertiary"}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+            </s-button>
+          ))}
+        </s-button-group>
       </s-section>
+
+      {/* One preview per tab, showing only what that tab controls. A single
+          combined preview meant someone editing filter colours was watching a
+          search panel and a product grid that had nothing to do with the
+          controls under their cursor. */}
+      {tab !== "advanced" && (
+        <s-section heading={PREVIEW_HEADING[tab]}>
+          <s-paragraph>
+            <s-text color="subdued">
+              Drawn with the settings on this tab. It updates as you edit —
+              nothing is saved until you press Save.
+            </s-text>
+          </s-paragraph>
+          <WidgetPreview settings={draft} part={tab} />
+        </s-section>
+      )}
 
       <fetcher.Form method="post" id="adsf-settings" ref={formRef}>
         {/* s-page only spaces its DIRECT s-section children. With the form in
             between, every section card stacked flush against the next, so the
-            gap has to be supplied here. */}
-        <s-stack direction="block" gap="large-500">
+            gap has to be supplied here. Each tab panel carries its own stack,
+            because the hidden wrapper in between breaks that adjacency again. */}
+        <Panel show={tab === "search"}>
         <s-section heading="Behaviour">
           <s-stack direction="block" gap="base">
             <s-select name="mode" label="What this app runs on your storefront" value={s.mode}>
@@ -321,6 +370,9 @@ export default function SettingsPage() {
           </s-stack>
         </s-section>
 
+        </Panel>
+
+        <Panel show={tab === "cards"}>
         <s-section heading="Results page">
           <s-stack direction="block" gap="base">
             <s-number-field name="resultsPerPage" label="Products per page" min={12} max={48} defaultValue={String(s.resultsPerPage)} />
@@ -339,6 +391,9 @@ export default function SettingsPage() {
           </s-stack>
         </s-section>
 
+        </Panel>
+
+        <Panel show={tab === "filters"}>
         <s-section heading="Collection pages">
           <s-stack direction="block" gap="base">
             <s-select
@@ -368,6 +423,9 @@ export default function SettingsPage() {
           </s-stack>
         </s-section>
 
+        </Panel>
+
+        <Panel show={tab === "cards"}>
         {s.productCards !== "theme" && (
           <s-section heading="Product card appearance">
             <s-stack direction="block" gap="base">
@@ -476,6 +534,9 @@ export default function SettingsPage() {
           </s-section>
         )}
 
+        </Panel>
+
+        <Panel show={tab === "filters"}>
         <s-section heading="Filter appearance">
           <s-stack direction="block" gap="base">
             <s-select name="filterButtonShape" label="Filter button shape" value={s.filterButtonShape}>
@@ -495,6 +556,9 @@ export default function SettingsPage() {
           </s-stack>
         </s-section>
 
+        </Panel>
+
+        <Panel show={tab === "search"}>
         <s-section heading="Relevance">
           <s-stack direction="block" gap="base">
             {/* Stemming. "simple" matches words exactly, which is right for a
@@ -578,6 +642,9 @@ export default function SettingsPage() {
           </s-stack>
         </s-section>
 
+        </Panel>
+
+        <Panel show={tab === "filters"}>
         <s-section heading="Colour swatches">
           <s-paragraph>
             <s-text color="subdued">
@@ -594,6 +661,9 @@ export default function SettingsPage() {
             placeholder={"royal blue = #4169e1\nheather grey = #b0b0b0\ncamo = https://cdn.example.com/camo.png"}
           />
         </s-section>
+        </Panel>
+
+        <Panel show={tab === "advanced"}>
         <s-section heading="Keeping the index current">
           <s-stack direction="block" gap="base">
             <Check
@@ -609,12 +679,13 @@ export default function SettingsPage() {
             </s-text>
           </s-stack>
         </s-section>
-        </s-stack>
+        </Panel>
       </fetcher.Form>
 
       {/* Outside the settings form on purpose: this installs or removes a Web
           Pixel through Shopify, which is a different kind of action from saving
           a colour and should not ride along with it. */}
+      <Panel show={tab === "advanced"}>
       <s-section heading="Revenue tracking">
         <s-stack direction="block" gap="base">
           <s-stack direction="inline" gap="small-500" alignItems="center">
@@ -661,6 +732,7 @@ export default function SettingsPage() {
           </s-text>
         </s-stack>
       </s-section>
+      </Panel>
 
       <s-section slot="aside" heading="How to turn it on">
         <s-paragraph>
@@ -751,7 +823,13 @@ const RATIO_CSS: Record<WidgetSettings["cardRatio"], string> = {
   natural: "auto",
 };
 
-function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
+function WidgetPreview({
+  settings: p,
+  part,
+}: {
+  settings: WidgetSettings;
+  part: Exclude<TabKey, "advanced">;
+}) {
   // "auto" can go either way per collection, so the preview shows our cards
   // for it: that is the case worth previewing, since the theme’s cards are
   // whatever the theme already looks like.
@@ -796,6 +874,7 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
     <s-box padding="base" background="subdued" borderRadius="base">
       <div style={{ display: "grid", gap: "1.25rem" }}>
         {/* --- Search panel --- */}
+        {part === "search" && (
         <div style={{ maxWidth: rich ? 620 : 380 }}>
           <div
             style={{
@@ -911,8 +990,10 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
             {rich ? `Rich, preview on the ${p.previewSide}` : "Simple list"}
           </s-text>
         </div>
+        )}
 
-        {/* --- Filters + grid --- */}
+        {/* --- Filter bar --- */}
+        {part === "filters" && (
         <div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
             {["Price", "Brand", "Size"].map((f, i) => (
@@ -945,7 +1026,17 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
               />
             ))}
           </div>
+          <s-text color="subdued">
+            {`${p.filterButtonShape} buttons · ${p.filterLayout} layout · counts ${
+              p.showFacetCounts ? "on" : "off"
+            }`}
+          </s-text>
+        </div>
+        )}
 
+        {/* --- Product cards --- */}
+        {part === "cards" && (
+        <div>
           <div
             style={{
               display: "grid",
@@ -1044,9 +1135,10 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
                   p.productCards === "app"
                     ? "This app draws these cards"
                     : "This app draws these cards when a filter needs it"
-                } · ${p.gridColumns} per row on desktop, ${p.gridColumnsMobile} on mobile · filters as a ${p.filterLayout} · ${p.resultsPerPage} per page`}
+                } · ${p.gridColumns} per row on desktop, ${p.gridColumnsMobile} on mobile · ${p.resultsPerPage} per page`}
           </s-text>
         </div>
+        )}
       </div>
     </s-box>
   );
