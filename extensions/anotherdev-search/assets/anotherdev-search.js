@@ -1237,26 +1237,30 @@
     function renderFacets(facets) {
       facetsInner.innerHTML = "";
 
-      // "Toolbar" is a row of dropdowns, not a row of open lists.
+      // Two separate questions, which used to be conflated into one.
       //
-      // It used to render exactly like "inline" — every facet expanded, side
-      // by side — so the two settings were indistinguishable, and opening or
-      // closing one pushed the product grid up and down the page. Toolbar now
-      // starts closed and opens over the grid; inline stays permanently open.
+      // asDropdown: does the open panel FLOAT over the products? Only the
+      //   toolbar does, and only there does opening one need to close the
+      //   rest, because floating panels on one row cover each other.
+      // startClosed: does a group begin collapsed? Everything except the
+      //   layout whose entire promise is "always open". A sidebar that opens
+      //   every group at once is a wall of every value in the catalog, which
+      //   is exactly what it looked like.
       var asDropdown = layout === "topbar";
+      var startClosed = layout !== "inline";
 
       facets.forEach(function (f) {
         var group = el("div", "adsf-facet");
         var heading = el("h4", "adsf-facet__title");
         var btn = el("button", "adsf-facet__toggle");
         btn.type = "button";
-        btn.setAttribute("aria-expanded", asDropdown ? "false" : "true");
+        btn.setAttribute("aria-expanded", startClosed ? "false" : "true");
         btn.textContent = f.label;
         heading.appendChild(btn);
         group.appendChild(heading);
 
         var bodyWrap = el("div", "adsf-facet__body");
-        bodyWrap.hidden = asDropdown;
+        bodyWrap.hidden = startClosed;
         btn.addEventListener("click", function () {
           var open = btn.getAttribute("aria-expanded") === "true";
           // One open at a time in the toolbar: two overlapping panels on the
@@ -2694,7 +2698,10 @@
     "</div>",
     '<div class="adsf-app__chips" data-adsf-chips></div>',
     '<div class="adsf-app__body">',
-    '  <aside class="adsf-facets" data-adsf-facets aria-label="Filters"><div class="adsf-facets__inner" data-adsf-facets-inner></div></aside>',
+    '  <aside class="adsf-facets" data-adsf-facets aria-label="Filters">',
+    '    <div class="adsf-facets__heading">Filters</div>',
+    '    <div class="adsf-facets__inner" data-adsf-facets-inner></div>',
+    '  </aside>',
     '  <div class="adsf-app__main">',
     '    <div class="adsf-grid" data-adsf-grid aria-busy="true"></div>',
     '    <nav class="adsf-pagination" data-adsf-pagination aria-label="Search results pages"></nav>',

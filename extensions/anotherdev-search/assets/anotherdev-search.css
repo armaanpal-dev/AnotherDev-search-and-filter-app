@@ -152,6 +152,55 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 
 .adsf-app__body { display: grid; grid-template-columns: 240px 1fr; gap: 1.75rem; align-items: start; }
 
+/* ---- Sidebar layout on the results page ------------------------------
+   The filter column has to start level with the count and the sort control,
+   which means those cannot sit in a full-width bar above everything. The app
+   root becomes the grid and __body steps out of the way with display:
+   contents, so the title, the sort row, the facets and the products can be
+   placed independently. */
+.adsf-app--filters-sidebar {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  gap: 0 1.75rem;
+  align-items: start;
+}
+.adsf-app--filters-sidebar .adsf-app__topbar { grid-column: 2; grid-row: 1; }
+.adsf-app--filters-sidebar .adsf-app__chips { grid-column: 2; grid-row: 2; }
+.adsf-app--filters-sidebar .adsf-app__body { display: contents; }
+.adsf-app--filters-sidebar .adsf-facets { grid-column: 1; grid-row: 1 / span 3; }
+.adsf-app--filters-sidebar .adsf-app__main { grid-column: 2; grid-row: 3; }
+
+/* Sidebar title, on the same line as the count and the sort control. */
+.adsf-facets__heading { display: none; }
+.adsf-app--filters-sidebar .adsf-facets__heading {
+  display: block;
+  padding: 0.5rem 0 1rem;
+  font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  font-size: 0.8em;
+  color: var(--adsf-filter-active-bg, var(--adsf-accent, inherit));
+}
+
+/* One rule per group, so a column of collapsed headings is scannable. */
+.adsf-app--filters-sidebar .adsf-facet {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding-bottom: 0.65rem;
+}
+.adsf-app--filters-sidebar .adsf-facets__inner { gap: 0.85rem; }
+.adsf-app--filters-sidebar .adsf-facet__toggle {
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--adsf-filter-radius, 0);
+  background: var(--adsf-filter-bg, none);
+  color: var(--adsf-filter-text, inherit);
+}
+.adsf-app--filters-sidebar .adsf-facet__toggle:hover {
+  background: var(--adsf-filter-hover-bg, var(--adsf-filter-bg, none));
+  color: var(--adsf-filter-hover-text, var(--adsf-filter-text, inherit));
+}
+.adsf-app--filters-sidebar .adsf-facet__toggle[aria-expanded="true"] {
+  color: var(--adsf-filter-active-bg, var(--adsf-accent, inherit));
+}
+
 .adsf-facets__inner { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1.4rem; }
 .adsf-facet__title { margin: 0 0 0.5rem; font: inherit; }
 .adsf-facet__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; max-height: 260px; overflow-y: auto; }
@@ -487,6 +536,18 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 
 /* ---- Mobile ---- */
 @media (max-width: 749px) {
+  /* The sidebar placements above assume two columns; on one column they
+     would stack the sort row on top of the products. */
+  .adsf-app--filters-sidebar { display: block; }
+  .adsf-app--filters-sidebar .adsf-app__topbar,
+  .adsf-app--filters-sidebar .adsf-app__chips,
+  .adsf-app--filters-sidebar .adsf-facets,
+  .adsf-app--filters-sidebar .adsf-app__main {
+    grid-column: auto; grid-row: auto;
+  }
+  .adsf-app--filters-sidebar .adsf-app__body { display: grid; }
+  .adsf-app--filters-sidebar .adsf-facets__heading { display: none; }
+
   /* Whatever the merchant chose, a phone gets the drawer. */
   .adsf-app__body,
   .adsf-app--filters-topbar .adsf-app__body,
