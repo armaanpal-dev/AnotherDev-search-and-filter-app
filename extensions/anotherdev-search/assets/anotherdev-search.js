@@ -2177,21 +2177,23 @@
           max.placeholder = fct.max != null ? String(Math.ceil(fct.max)) : "Max";
           max.value = state.priceMax || "";
           // Same rule as the app grid: commit on change, no Apply button.
-          function commitRange() {
+          // Function EXPRESSIONS, not declarations: this is a block, and a
+          // declaration inside one is hoisted differently across engines.
+          var commitRange = function () {
             var nextMin = min.value || null;
             var nextMax = max.value || null;
             if (nextMin === state.priceMin && nextMax === state.priceMax) return;
             state.priceMin = nextMin;
             state.priceMax = nextMax;
             renderTheme();
-          }
-          min.addEventListener("change", commitRange);
-          max.addEventListener("change", commitRange);
-          function onKey(e) {
+          };
+          var onKey = function (e) {
             if (e.key !== "Enter") return;
             e.preventDefault();
             commitRange();
-          }
+          };
+          min.addEventListener("change", commitRange);
+          max.addEventListener("change", commitRange);
           min.addEventListener("keydown", onKey);
           max.addEventListener("keydown", onKey);
           rw.appendChild(min);

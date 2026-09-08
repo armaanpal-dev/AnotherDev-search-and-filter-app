@@ -162,11 +162,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 type TabKey = "search" | "filters" | "cards" | "advanced";
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "search", label: "Search" },
-  { key: "filters", label: "Filters" },
-  { key: "cards", label: "Product cards" },
-  { key: "advanced", label: "Advanced" },
+const TABS: { key: TabKey; label: string; blurb: string }[] = [
+  { key: "search", label: "Search", blurb: "Behaviour, relevance, panel layout, colours and fonts" },
+  { key: "filters", label: "Filters", blurb: "Collection pages, filter appearance and colour swatches" },
+  { key: "cards", label: "Product cards", blurb: "Grid size, image shape and card appearance" },
+  { key: "advanced", label: "Advanced", blurb: "Indexing, search language and revenue tracking" },
 ];
 
 const PREVIEW_HEADING: Record<TabKey, string> = {
@@ -303,18 +303,27 @@ export default function SettingsPage() {
         <s-text color="subdued">Storefront: {domain}</s-text>
       </s-section>
 
-      <s-section>
-        <s-button-group gap="base">
-          {TABS.map((t) => (
-            <s-button
-              key={t.key}
-              variant={tab === t.key ? "primary" : "tertiary"}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-            </s-button>
-          ))}
-        </s-button-group>
+      {/* Every setting still exists; the tabs only decide which are on screen.
+          The inactive tabs are secondary rather than tertiary buttons: tertiary
+          renders borderless, so the bar read as a line of text and the other
+          three groups looked deleted rather than merely hidden. */}
+      <s-section heading="Settings">
+        <s-stack direction="block" gap="base">
+          <s-button-group gap="base">
+            {TABS.map((t) => (
+              <s-button
+                key={t.key}
+                variant={tab === t.key ? "primary" : "secondary"}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+              </s-button>
+            ))}
+          </s-button-group>
+          <s-text color="subdued">
+            {TABS.find((t) => t.key === tab)?.blurb}
+          </s-text>
+        </s-stack>
       </s-section>
 
       {/* One preview per tab, showing only what that tab controls. A single
