@@ -19,6 +19,26 @@ type AdminGraphql = {
 
 export type PixelState = "active" | "inactive" | "unavailable";
 
+/**
+ * The scopes the Web Pixel needs. Compared against what the shop actually
+ * granted, so the admin can tell "you never approved this" apart from "you
+ * approved it and something else is broken" — reinstalling only fixes the
+ * first, and telling a merchant to reinstall for the second sends them round
+ * a loop that cannot terminate.
+ */
+export const PIXEL_SCOPES = ["write_pixels", "read_customer_events"];
+
+/** Which pixel scopes this session is missing. Empty means all granted. */
+export function missingPixelScopes(granted: string | null | undefined): string[] {
+  const held = new Set(
+    String(granted ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  return PIXEL_SCOPES.filter((s) => !held.has(s));
+}
+
 const PIXEL_QUERY = `#graphql
   query WebPixelStatus {
     webPixel { id settings }
@@ -60,14 +80,26 @@ function pixelSettings(): string {
  * pixel scopes yet: the Settings page has to be able to render a truthful
  * "not connected" state without the whole loader failing.
  */
-export async function getPixelState(admin: AdminGraphql): Promise<PixelState> {
+export async function getPixelState(
+  admin: AdminGraphql,
+): Promise<{ state: PixelState; reason?: string }> {
   try {
     const res = await admin.graphql(PIXEL_QUERY);
     const json = await res.json();
-    if (json.errors?.length) return "unavailable";
-    return json.data?.webPixel?.id ? "active" : "inactive";
-  } catch {
-    return "unavailable";
+    if (json.errors?.length) {
+      // Kept rather than swallowed. Every failure used to collapse into one
+      // "reinstall the app" message, including failures a reinstall cannot
+      // touch — a stale SCOPES env var, or an app version on Shopify that
+      // never declared the pixel scopes.
+      const reason = json.errors
+        .map((e: { message?: string }) => e?.message)
+        .filter(Boolean)
+        .join("; ");
+      return { state: "unavailable", reason: reason || "The Admin API rejected the request." };
+    }
+    return { state: json.data?.webPixel?.id ? "active" : "inactive" };
+  } catch (e) {
+    return { state: "unavailable", reason: (e as Error)?.message ?? "Request failed." };
   }
 }
 

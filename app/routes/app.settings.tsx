@@ -12,7 +12,13 @@ import { getPlanStatus } from "../lib/billing.server";
 import { semanticReady } from "../lib/search/embeddings.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { SEARCH_LANGUAGES, toTsConfig } from "../lib/search/languages";
-import { ensureWebPixel, removeWebPixel, getPixelState } from "../lib/pixel.server";
+import {
+  ensureWebPixel,
+  removeWebPixel,
+  getPixelState,
+  missingPixelScopes,
+  PIXEL_SCOPES,
+} from "../lib/pixel.server";
 import { TILES, useSaveToast } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -20,6 +26,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
   const { limits } = await getPlanStatus(billing, shop.planOverride);
   const isPro = limits.semantic;
+  const pixel = await getPixelState(admin);
   return {
     settings: resolveSettings(shop.settings),
     domain: shop.domain,
@@ -30,7 +37,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // and the pgvector column in Postgres; without either the toggle would be a
     // switch wired to nothing.
     semanticAvailable: await semanticReady(),
-    pixel: await getPixelState(admin),
+    pixel: pixel.state,
+    // Why it is unavailable, rather than one catch-all "reinstall" message:
+    // a stale SCOPES variable and an app version that never declared the
+    // pixel scopes both look identical from here, and neither is fixed by
+    // reinstalling.
+    pixelReason: pixel.reason ?? null,
+    missingScopes: missingPixelScopes(session.scope),
+    requiredScopes: PIXEL_SCOPES,
   };
 };
 
@@ -185,7 +199,16 @@ const PREVIEW_HEADING: Record<TabKey, string> = {
  */
 function Panel({ show, children }: { show: boolean; children: ReactNode }) {
   return (
-    <div style={{ display: show ? "block" : "none" }}>
+    <div
+      style={{
+        display: show ? "block" : "none",
+        // A tab is built from more than one panel, because some sections live
+        // inside the settings form and some outside it (they submit on their
+        // own). The stack below spaces sections WITHIN a panel; two panels are
+        // plain siblings, so without this their cards sat flush together.
+        marginBlockEnd: show ? "var(--s-space-large-500, 1.25rem)" : undefined,
+      }}
+    >
       <s-stack direction="block" gap="large-500">{children}</s-stack>
     </div>
   );
@@ -212,7 +235,18 @@ function swatchesToText(swatches: Record<string, string>): string {
 }
 
 export default function SettingsPage() {
-  const { settings, domain, isPro, semanticAvailable, searchLanguage, autoSyncEnabled, pixel } =
+  const {
+    settings,
+    domain,
+    isPro,
+    semanticAvailable,
+    searchLanguage,
+    autoSyncEnabled,
+    pixel,
+    pixelReason,
+    missingScopes,
+    requiredScopes,
+  } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const pixelFetcher = useFetcher<typeof action>();
@@ -395,12 +429,6 @@ export default function SettingsPage() {
               <s-number-field name="gridColumns" label="Cards per row on desktop" min={2} max={5} defaultValue={String(s.gridColumns)} />
               <s-number-field name="gridColumnsMobile" label="Cards per row on mobile" min={1} max={4} defaultValue={String(s.gridColumnsMobile)} />
             </s-grid>
-            <s-select name="filterLayout" label="Filter layout" value={s.filterLayout}>
-              <s-option value="sidebar">Sidebar beside the grid, drawer on mobile</s-option>
-              <s-option value="topbar">Toolbar in one row above the grid</s-option>
-              <s-option value="drawer">Always behind a Filters button</s-option>
-              <s-option value="inline">Always open, stacked above the grid</s-option>
-            </s-select>
             <Check name="showVendor" checked={s.showVendor} label="Show the brand name on result cards" />
             <Check name="quickAdd" checked={s.quickAdd} label="Add to cart directly from results (single-variant products)" />
           </s-stack>
@@ -554,6 +582,15 @@ export default function SettingsPage() {
         <Panel show={tab === "filters"}>
         <s-section heading="Filter appearance">
           <s-stack direction="block" gap="base">
+            {/* Where the filters sit. This lived under "Results page" on the
+                Product cards tab, so it could not be found from the Filters tab
+                where anyone would look for it. */}
+            <s-select name="filterLayout" label="Where filters appear" value={s.filterLayout}>
+              <s-option value="sidebar">Sidebar beside the grid, drawer on mobile</s-option>
+              <s-option value="topbar">Toolbar in one row above the grid</s-option>
+              <s-option value="drawer">Always behind a Filters button</s-option>
+              <s-option value="inline">Always open, stacked above the grid</s-option>
+            </s-select>
             <s-select name="filterButtonShape" label="Filter button shape" value={s.filterButtonShape}>
               <s-option value="pill">Pill</s-option>
               <s-option value="rounded">Rounded corners</s-option>
@@ -718,12 +755,37 @@ export default function SettingsPage() {
             line items, and the anonymous session id the search widget already uses.
           </s-text>
           {pixel === "unavailable" ? (
-            <s-banner tone="warning" heading="Reinstall needed">
-              <s-paragraph>
-                This store was installed before revenue tracking existed, so it has
-                not approved the permission the pixel needs. Reinstall the app from
-                your Apps page to approve it.
-              </s-paragraph>
+            <s-banner
+              tone="warning"
+              heading={
+                missingScopes.length
+                  ? "Permission not granted yet"
+                  : "Revenue tracking is unavailable"
+              }
+            >
+              {missingScopes.length ? (
+                <>
+                  <s-paragraph>
+                    This store has not approved {missingScopes.join(" and ")}, which
+                    the pixel needs.
+                  </s-paragraph>
+                  <s-paragraph>
+                    If reinstalling has not fixed this, the app version Shopify holds
+                    does not ask for these scopes yet. Run shopify app deploy, check
+                    that the SCOPES variable on the server matches shopify.app.toml,
+                    then reinstall. Reinstalling only ever re-approves the scopes the
+                    deployed version asks for, so on its own it cannot fix this.
+                  </s-paragraph>
+                </>
+              ) : (
+                <>
+                  <s-paragraph>
+                    This store has already granted {requiredScopes.join(" and ")}, so
+                    this is not a permissions problem and reinstalling will not help.
+                  </s-paragraph>
+                  {pixelReason && <s-paragraph>Shopify said: {pixelReason}</s-paragraph>}
+                </>
+              )}
             </s-banner>
           ) : (
             <pixelFetcher.Form method="post">

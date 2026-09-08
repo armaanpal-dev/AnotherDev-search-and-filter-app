@@ -38,7 +38,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Purchase numbers are only meaningful once the pixel is live; without it the
   // revenue tiles would read as "search earns nothing" rather than "not measured
   // yet", which is the opposite of the truth.
-  const pixel = await getPixelState(admin);
+  // getPixelState reports WHY it is unavailable as well as whether it is; this
+  // page only needs the state, so the reason is dropped here rather than
+  // threaded through every metric tile.
+  const { state: pixel } = await getPixelState(admin);
 
   return { ...summary, plan, maxDays: limits.analyticsDays, pixel };
 };
