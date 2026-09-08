@@ -748,6 +748,158 @@
   // =======================================================================
   //  2. Faceted results application
   // =======================================================================
+  /* ---- Adding to cart the way the theme does ----------------------------
+   *
+   * The old version POSTed JSON to a hardcoded "/cart/add.js" and then fired
+   * two guessed events. That worked on a plain English-only Dawn store and
+   * quietly failed everywhere else:
+   *
+   *   - a locale-prefixed storefront (/fr/...) needs the localised route, so
+   *     the hardcoded path added to the wrong cart or 404ed;
+   *   - a JSON body carries no form_type, which is the field most cart apps
+   *     and slide-out drawers key off to notice an add;
+   *   - nothing re-rendered the drawer, so the cart bubble stayed stale until
+   *     the shopper navigated.
+   *
+   * So instead of inventing a request, we copy the one the theme already
+   * makes: same route, same form fields, same headers, plus bundled section
+   * rendering so the theme re-renders its own cart markup. */
+
+  /** Locale-aware storefront root: "/" or "/fr/" on a translated store. */
+  function routeRoot() {
+    var r =
+      window.Shopify && window.Shopify.routes && window.Shopify.routes.root;
+    if (!r) return "/";
+    return r.charAt(r.length - 1) === "/" ? r : r + "/";
+  }
+
+  /** The theme’s own add-to-cart URL when it publishes one, else the route. */
+  function cartAddUrl() {
+    var themeRoute =
+      (window.routes && window.routes.cart_add_url) ||
+      (window.theme && window.theme.routes && window.theme.routes.cart_add_url) ||
+      (window.Shopify &&
+        window.Shopify.routes &&
+        window.Shopify.routes.cart_add_url);
+    if (themeRoute) {
+      return String(themeRoute).indexOf(".js") > -1 ? themeRoute : themeRoute + ".js";
+    }
+    return routeRoot() + "cart/add.js";
+  }
+
+  /**
+   * The hidden fields the theme puts in its own product form.
+   *
+   * Shopify itself only needs id and quantity, but form_type and utf8 are what
+   * a third-party cart app looks for to recognise an add as a real product-form
+   * submission. Copying them from the live form means we match whatever this
+   * theme sends, instead of hardcoding Dawn’s answer for every theme.
+   */
+  function themeFormFields() {
+    var out = { form_type: "product", utf8: "✓" };
+    var form = document.querySelector('form[action*="/cart/add"]');
+    if (!form) return out;
+    Array.prototype.forEach.call(
+      form.querySelectorAll('input[type="hidden"]'),
+      function (input) {
+        var name = input.getAttribute("name");
+        // id and quantity are per-product and set by the caller; properties
+        // belong to the product that form was rendered for, not to ours.
+        if (!name || name === "id" || name === "quantity") return;
+        if (name.indexOf("properties[") === 0) return;
+        out[name] = input.value;
+      },
+    );
+    return out;
+  }
+
+  /* Elements that mean "this theme has a cart drawer". Attribute and tag based
+     rather than class based: class names are theme-specific, but a custom
+     element name or an id survives reskinning. */
+  var CART_HOSTS = [
+    "cart-drawer",
+    "cart-notification",
+    "#CartDrawer",
+    "#cart-drawer",
+    "#CartNotification",
+    "[id*='cart-drawer' i]",
+    "[data-cart-drawer]",
+    "#cart-icon-bubble",
+    ".cart-count-bubble",
+    "[data-cart-count]",
+  ];
+
+  /** Section ids of everything on the page that renders cart state, max five. */
+  function cartSectionIds() {
+    var ids = [];
+    CART_HOSTS.forEach(function (sel) {
+      var nodes;
+      try { nodes = document.querySelectorAll(sel); } catch (e) { return; }
+      Array.prototype.forEach.call(nodes, function (node) {
+        var section = node.closest ? node.closest('[id^="shopify-section-"]') : null;
+        if (!section) return;
+        var id = section.id.replace("shopify-section-", "");
+        // Bundled section rendering accepts at most five.
+        if (id && ids.indexOf(id) < 0 && ids.length < 5) ids.push(id);
+      });
+    });
+    return ids;
+  }
+
+  /**
+   * Swap in the cart markup the server just rendered.
+   *
+   * innerHTML does not run <script> tags, but every modern theme wraps its
+   * drawer in a custom element, and inserting one runs connectedCallback —
+   * which is how the theme rebinds its own behaviour. That is the mechanism
+   * Shopify’s own docs point at, so we do not try to re-run anything ourselves.
+   */
+  function applyCartSections(sections) {
+    if (!sections) return;
+    Object.keys(sections).forEach(function (id) {
+      var html = sections[id];
+      if (typeof html !== "string") return; // a bad id comes back as null
+      var host = document.getElementById("shopify-section-" + id);
+      if (host) host.innerHTML = html;
+    });
+  }
+
+  /* Events themes and cart apps listen for. Dispatching the union is safe:
+     a theme that does not know an event simply never hears it, and the cost of
+     one extra CustomEvent is nothing next to a cart that never opens. */
+  var CART_EVENTS = [
+    "cart:refresh",
+    "cart:build",
+    "cart:updated",
+    "cart:added",
+    "cart-drawer:open",
+    "ajaxProduct:added",
+    "product:added-to-cart",
+  ];
+
+  /** Ask the theme to show its cart, without guessing at class names. */
+  function openThemeCart(detail) {
+    CART_EVENTS.forEach(function (name) {
+      document.dispatchEvent(
+        new CustomEvent(name, { bubbles: true, detail: detail || {} }),
+      );
+    });
+    // Dawn and its forks expose the drawer as a custom element with open().
+    var drawer =
+      document.querySelector("cart-drawer") ||
+      document.querySelector("cart-notification");
+    if (drawer && typeof drawer.open === "function") {
+      try { drawer.open(); return true; } catch (e) { /* fall through */ }
+    }
+    // Otherwise click the theme’s own drawer toggle if it published one. Only
+    // attribute hooks, never an <a href="/cart">: clicking that would navigate
+    // away from the results the shopper is still browsing.
+    var toggle = document.querySelector(
+      "[data-cart-drawer-toggle], [data-drawer-open='cart'], [aria-controls='CartDrawer']",
+    );
+    if (toggle) { toggle.click(); return true; }
+    return false;
+  }
   /** The merchant’s add-to-cart wording, falling back to the default. */
   function addLabel(cfg) {
     return (cfg && cfg.cardButtonLabel) || "Add to cart";
@@ -907,8 +1059,9 @@
     }
 
     /**
-     * Add to cart without leaving the results. Uses the theme-agnostic
-     * /cart/add.js endpoint and then asks the theme to refresh its cart UI.
+     * Add to cart without leaving the results, by making the same request the
+     * theme’s own product form makes — see the cart helpers at the top of this
+     * file for why the shape of the request matters.
      */
     function bindQuickAdd() {
       Array.prototype.forEach.call(grid.querySelectorAll("[data-adsf-add]"), function (btn) {
@@ -916,18 +1069,40 @@
           var id = btn.getAttribute("data-adsf-add");
           btn.disabled = true;
           btn.textContent = "Adding…";
-          fetch("/cart/add.js", {
+
+          // Built as FormData, not JSON, because this is the shape a product
+          // form submits and the shape cart apps recognise.
+          var body = new FormData();
+          var fields = themeFormFields();
+          Object.keys(fields).forEach(function (k) { body.append(k, fields[k]); });
+          body.append("id", id);
+          body.append("quantity", "1");
+
+          // Ask the server to re-render the theme’s own cart markup in the same
+          // round trip, so the drawer and the count bubble are correct the
+          // moment we open them.
+          var sections = cartSectionIds();
+          if (sections.length) {
+            body.append("sections", sections.join(","));
+            body.append("sections_url", location.pathname + location.search);
+          }
+
+          fetch(cartAddUrl(), {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ items: [{ id: Number(id), quantity: 1 }] }),
+            // No Content-Type: the browser must set the multipart boundary.
+            // X-Requested-With is what several cart apps sniff for an AJAX add.
+            headers: {
+              Accept: "application/javascript",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+            body: body,
           })
             .then(function (r) { if (!r.ok) throw new Error("add failed"); return r.json(); })
-            .then(function () {
+            .then(function (data) {
               btn.textContent = "Added";
               track(cfg.proxy, "add_to_cart", state.term, btn.getAttribute("data-adsf-add-product"));
-              // Most themes listen for one of these to re-render the cart bubble.
-              document.dispatchEvent(new CustomEvent("cart:refresh", { bubbles: true }));
-              document.dispatchEvent(new CustomEvent("cart:build", { bubbles: true }));
+              applyCartSections(data && data.sections);
+              openThemeCart({ id: id, quantity: 1, source: "anotherdev-search" });
               setTimeout(function () { btn.disabled = false; btn.textContent = addLabel(cfg); }, 2500);
             })
             .catch(function () {
@@ -2474,6 +2649,9 @@
     if (s.fontSize) rs.setProperty("--adsf-dd-font-size", s.fontSize + "px");
     if (s.fontWeight) rs.setProperty("--adsf-dd-font-weight", s.fontWeight);
     if (s.gridColumns) rs.setProperty("--adsf-cols", String(s.gridColumns));
+    if (s.gridColumnsMobile) {
+      rs.setProperty("--adsf-cols-mobile", String(s.gridColumnsMobile));
+    }
 
     // Product card appearance. Every value was validated server-side by
     // resolveSettings - colours against a strict pattern, numbers clamped,
@@ -2486,7 +2664,15 @@
       wide: "16 / 9",
       natural: "auto",
     };
-    rs.setProperty("--adsf-card-ratio", RATIOS[s.cardRatio] || RATIOS.square);
+    // A fixed image height wins over the shape: asking for both is
+    // contradictory, and silently ignoring the number the merchant typed is
+    // worse than ignoring the dropdown they left alone.
+    var imgH = Number(s.cardImageHeight) || 0;
+    rs.setProperty("--adsf-card-img-h", imgH > 0 ? imgH + "px" : "auto");
+    rs.setProperty(
+      "--adsf-card-ratio",
+      imgH > 0 ? "auto" : RATIOS[s.cardRatio] || RATIOS.square,
+    );
     rs.setProperty("--adsf-card-fit", s.cardImageFit === "contain" ? "contain" : "cover");
     rs.setProperty("--adsf-card-align", s.cardAlign === "center" ? "center" : "left");
     if (s.cardRadius != null) rs.setProperty("--adsf-card-radius", s.cardRadius + "px");

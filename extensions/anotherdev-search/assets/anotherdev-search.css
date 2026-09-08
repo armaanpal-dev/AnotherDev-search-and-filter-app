@@ -191,6 +191,10 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-card__img, .adsf-card__noimg {
   width: 100%; display: block;
   object-fit: var(--adsf-card-fit, cover);
+  /* Height and ratio are alternatives, not a pair: when a merchant sets a
+     height the ratio is switched to auto, and when they do not the height
+     stays auto and the ratio governs. */
+  height: var(--adsf-card-img-h, auto);
   aspect-ratio: var(--adsf-card-ratio, 1 / 1);
   border-radius: var(--adsf-card-radius, 0);
   background: var(--adsf-card-placeholder, rgba(0, 0, 0, 0.06));
@@ -378,7 +382,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   .adsf-app--filters-topbar .adsf-app__body,
   .adsf-app--filters-inline .adsf-app__body { grid-template-columns: 1fr; }
   .adsf-app__filter-toggle { display: inline-block; }
-  .adsf-app { --adsf-cols: 2; }
+  .adsf-app { --adsf-cols: var(--adsf-cols-mobile, 2); }
   .adsf-app--filters-topbar .adsf-facets__inner,
   .adsf-app--filters-inline .adsf-facets__inner {
     flex-direction: column; border-bottom: 0; margin-bottom: 0; padding: 0;

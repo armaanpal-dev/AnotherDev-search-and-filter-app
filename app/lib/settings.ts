@@ -60,6 +60,12 @@ export interface WidgetSettings {
    * cover the things inheritance cannot give us: proportions, chrome, and the
    * two text roles a product card actually has. */
   cardRatio: "square" | "portrait" | "landscape" | "wide" | "natural";
+  /**
+   * Fixed height in px for the image area, which is what actually decides
+   * how tall a card is. 0 means "follow cardRatio instead" — the two are
+   * alternatives, not a pair, so a height overrides the shape.
+   */
+  cardImageHeight: number;
   cardImageFit: "cover" | "contain";
   cardRadius: number;           // px, corners on image and card
   cardBorder: "none" | "line" | "shadow";
@@ -98,7 +104,8 @@ export interface WidgetSettings {
   layout: "rich" | "list";      // two-pane hover preview vs simple list
   previewSide: "left" | "right";
   resultsPerPage: number;
-  gridColumns: number;
+  gridColumns: number;           // cards per row on desktop
+  gridColumnsMobile: number;    // cards per row below 750px
   showVendor: boolean;
   quickAdd: boolean;            // add-to-cart straight from the results grid
   // Appearance
@@ -127,6 +134,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   collectionFilters: true,
   productCards: "auto",
   cardRatio: "square",
+  cardImageHeight: 0,
   cardImageFit: "cover",
   cardRadius: 8,
   cardBorder: "none",
@@ -159,6 +167,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   previewSide: "left",
   resultsPerPage: 24,
   gridColumns: 4,
+  gridColumnsMobile: 2,
   showVendor: false,
   quickAdd: false,
   accentColor: "#111111",
@@ -188,6 +197,7 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     collectionFilters: bool(s.collectionFilters, DEFAULT_SETTINGS.collectionFilters),
     productCards: oneOf(s.productCards, ["auto", "theme", "app"], DEFAULT_SETTINGS.productCards),
     cardRatio: oneOf(s.cardRatio, ["square", "portrait", "landscape", "wide", "natural"], DEFAULT_SETTINGS.cardRatio),
+    cardImageHeight: num(s.cardImageHeight, DEFAULT_SETTINGS.cardImageHeight, 0, 600),
     cardImageFit: oneOf(s.cardImageFit, ["cover", "contain"], DEFAULT_SETTINGS.cardImageFit),
     cardRadius: num(s.cardRadius, DEFAULT_SETTINGS.cardRadius, 0, 32),
     cardBorder: oneOf(s.cardBorder, ["none", "line", "shadow"], DEFAULT_SETTINGS.cardBorder),
@@ -224,6 +234,7 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     previewSide: oneOf(s.previewSide, ["left", "right"], DEFAULT_SETTINGS.previewSide),
     resultsPerPage: num(s.resultsPerPage, DEFAULT_SETTINGS.resultsPerPage, 12, 48),
     gridColumns: num(s.gridColumns, DEFAULT_SETTINGS.gridColumns, 2, 5),
+    gridColumnsMobile: num(s.gridColumnsMobile, DEFAULT_SETTINGS.gridColumnsMobile, 1, 4),
     showVendor: bool(s.showVendor, DEFAULT_SETTINGS.showVendor),
     quickAdd: bool(s.quickAdd, DEFAULT_SETTINGS.quickAdd),
     accentColor: color(s.accentColor, DEFAULT_SETTINGS.accentColor),

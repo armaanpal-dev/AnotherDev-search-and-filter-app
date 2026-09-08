@@ -85,10 +85,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     maxSuggestions: numeric("maxSuggestions"),
     resultsPerPage: numeric("resultsPerPage"),
     gridColumns: numeric("gridColumns"),
+    gridColumnsMobile: numeric("gridColumnsMobile"),
     fontSize: numeric("fontSize"),
     filterLayout: field("filterLayout"),
     productCards: field("productCards"),
     cardRatio: field("cardRatio"),
+    cardImageHeight: numeric("cardImageHeight"),
     cardImageFit: field("cardImageFit"),
     cardRadius: numeric("cardRadius"),
     cardBorder: field("cardBorder"),
@@ -321,9 +323,10 @@ export default function SettingsPage() {
 
         <s-section heading="Results page">
           <s-stack direction="block" gap="base">
+            <s-number-field name="resultsPerPage" label="Products per page" min={12} max={48} defaultValue={String(s.resultsPerPage)} />
             <s-grid gridTemplateColumns="1fr 1fr" gap="base">
-              <s-number-field name="resultsPerPage" label="Products per page" min={12} max={48} defaultValue={String(s.resultsPerPage)} />
-              <s-number-field name="gridColumns" label="Grid columns (desktop)" min={2} max={5} defaultValue={String(s.gridColumns)} />
+              <s-number-field name="gridColumns" label="Cards per row on desktop" min={2} max={5} defaultValue={String(s.gridColumns)} />
+              <s-number-field name="gridColumnsMobile" label="Cards per row on mobile" min={1} max={4} defaultValue={String(s.gridColumnsMobile)} />
             </s-grid>
             <s-select name="filterLayout" label="Filter layout" value={s.filterLayout}>
               <s-option value="sidebar">Sidebar beside the grid, drawer on mobile</s-option>
@@ -386,6 +389,20 @@ export default function SettingsPage() {
                   <s-option value="contain">Fit the whole image in</s-option>
                 </s-select>
               </s-grid>
+
+              <s-number-field
+                name="cardImageHeight"
+                label="Fixed image height in pixels (0 to use the shape above)"
+                min={0}
+                max={600}
+                defaultValue={String(s.cardImageHeight)}
+              />
+              {s.cardImageHeight > 0 && (
+                <s-text color="subdued">
+                  A fixed height overrides Image shape. Set it back to 0 to use
+                  the shape again.
+                </s-text>
+              )}
 
               <s-grid gridTemplateColumns="1fr 1fr" gap="base">
                 <s-select name="cardBorder" label="Card outline" value={s.cardBorder}>
@@ -739,6 +756,7 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
   // for it: that is the case worth previewing, since the theme’s cards are
   // whatever the theme already looks like.
   const themeCards = p.productCards === "theme";
+  const fixedImage = !themeCards && p.cardImageHeight > 0;
   const rich = p.layout === "rich";
   const radius =
     p.filterButtonShape === "square" ? "0" : p.filterButtonShape === "rounded" ? "8px" : "999px";
@@ -968,8 +986,11 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
               >
                 <div
                   style={{
-                    aspectRatio: themeCards ? "1/1" : RATIO_CSS[p.cardRatio],
-                    minHeight: !themeCards && p.cardRatio === "natural" ? 96 : undefined,
+                    aspectRatio:
+                      themeCards || fixedImage ? undefined : RATIO_CSS[p.cardRatio],
+                    height: fixedImage ? p.cardImageHeight : undefined,
+                    minHeight:
+                      !themeCards && !fixedImage && p.cardRatio === "natural" ? 96 : undefined,
                     background: "rgba(0,0,0,.07)",
                     borderRadius: themeCards ? 8 : p.cardRadius,
                   }}
@@ -1023,7 +1044,7 @@ function WidgetPreview({ settings: p }: { settings: WidgetSettings }) {
                   p.productCards === "app"
                     ? "This app draws these cards"
                     : "This app draws these cards when a filter needs it"
-                } · ${p.gridColumns} columns · filters as a ${p.filterLayout} · ${p.resultsPerPage} per page`}
+                } · ${p.gridColumns} per row on desktop, ${p.gridColumnsMobile} on mobile · filters as a ${p.filterLayout} · ${p.resultsPerPage} per page`}
           </s-text>
         </div>
       </div>
