@@ -58,10 +58,17 @@ export function ModeCard({
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="mode" />
             <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="end">
+              {/* Option labels are LITERAL text, not {MODE_LABELS.x}.
+                  s-option takes its label from its text content when it
+                  registers with the select, and a JSX expression child is
+                  committed as a separate text-node insertion — which rendered
+                  the whole select blank. Every other s-select in this app uses
+                  literal children, and every one of them works. MODE_LABELS
+                  still drives the badge above, where a dynamic child is fine. */}
               <s-select name="mode" label="Change this" value={mode}>
-                <s-option value="both">{MODE_LABELS.both}</s-option>
-                <s-option value="search">{MODE_LABELS.search}</s-option>
-                <s-option value="filters">{MODE_LABELS.filters}</s-option>
+                <s-option value="both">Search and filters</s-option>
+                <s-option value="search">Search only</s-option>
+                <s-option value="filters">Filters only</s-option>
               </s-select>
               <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>
                 Apply
