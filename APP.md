@@ -1,8 +1,8 @@
 # AnotherDev Search and Filters — complete reference
 
 Everything the app is, in one document: what it does, how it is built, every
-route, every setting, every environment variable, and the constraints that
-shaped the design.
+route, every one of the 65 storefront settings, every environment variable, and
+the constraints that shaped the design.
 
 Companion documents: [README.md](README.md) is the short introduction,
 [DEPLOY.md](DEPLOY.md) covers deployment (**note: still written for Fly.io — the
@@ -20,15 +20,18 @@ and adds faceted filtering to search and collection pages.
   merchant-defined synonyms
 - **Searches more than titles** — descriptions, vendors, product types, tags,
   SKUs, variant names, options and metafields
-- **Faceted filters** — on both the search results page and collection pages
+- **Faceted filters** — on the search results page and on collection pages, in
+  four selectable layouts
 - **Merchandising** — pin, boost, bury or hide products per search term or
   collection; redirect a term to any page
 - **Analytics** — top searches, zero-result searches, click-through, add-to-cart
-  and (optionally) purchase attribution
+  and optional purchase attribution
 - **Recommendations** — related-product rails driven by the same index
+- **Add to cart from results** — matching the theme's own cart behaviour
 
-The app holds **read-only** Shopify scopes. It never writes to a merchant's
-store.
+The app holds **read-only** catalog scopes. It never writes to a merchant's
+store. (`write_pixels` + `read_customer_events` are the two exceptions, and they
+exist only for the optional revenue-tracking pixel.)
 
 ---
 
@@ -58,7 +61,7 @@ Bridge v4, Polaris web components, Prisma, PostgreSQL, Docker on Railway.
 
 ### Why Postgres rather than a hosted search service
 
-Full-text search, trigram fuzzy matching, faceting, and optional vector
+Full-text search, trigram fuzzy matching, faceting and optional vector
 similarity all live in one database that already holds the catalog mirror. No
 second system to keep in sync, no per-query cost, and a facet count is a
 `GROUP BY` rather than a second network round trip.
@@ -96,7 +99,7 @@ updates arrive by webhook; `cron.sync` reconciles on a schedule.
 
 | Route | Purpose |
 |---|---|
-| `app._index` | Dashboard — 7-day metrics, setup steps, links |
+| `app._index` | Dashboard — storefront mode, 7-day metrics, setup steps, links |
 | `app.sync` | Index: run and monitor the catalog sync, auto-sync toggle |
 | `app.filters` | **Facet configuration** — which filters exist, their order, display type, and quick-filter chips |
 | `app.synonyms` | Synonym groups (multiway and one-way), CSV import |
@@ -108,7 +111,12 @@ updates arrive by webhook; `cron.sync` reconciles on a schedule.
 
 **Filters page vs Settings → Filters tab.** The Filters *page* is configuration:
 which facets exist and in what order. The Filters *tab* in Settings is
-appearance: how they look. They are deliberately separate.
+presentation: where they sit and how they look. Deliberately separate.
+
+Every page saves through a fetcher returning `{ ok: true }` or `{ error }`, and
+the shared `useSaveToast` hook in `app/components/ui.tsx` turns that into an App
+Bridge toast — a toast rather than a banner because on a long form you are
+usually scrolled away from the top when you press Save.
 
 ## 5. Storefront routes (App Proxy, `/apps/anotherdev-search/*`)
 
@@ -136,55 +144,138 @@ Every one is HMAC-verified by Shopify before it reaches the app.
 
 ## 6. Settings
 
-`app/lib/settings.ts` is the single source of truth. Stored as JSON on `Shop`,
-read by the storefront through `proxy.config`, and validated on the way in —
-colours against a strict pattern, numbers clamped to a range, text stripped of
-angle brackets. Nothing unvalidated reaches a CSS declaration.
+65 settings, all validated on the way in — colours against a strict pattern,
+numbers clamped to a range, text stripped of angle brackets. Nothing unvalidated
+ever reaches a CSS declaration. Stored as JSON on `Shop`, read by the storefront
+through `proxy.config`. `app/lib/settings.ts` is the single source of truth.
 
-The Settings page has four tabs. Panels are hidden with CSS rather than
-unmounted, so edits on one tab survive a save made from another.
+### Storefront mode — its own section, above the tabs
+
+**What this app runs on your storefront**: **Search and filters** · **Search
+only** · **Filters only**.
+
+Deliberately not one of the tabs. It is the switch every other setting is
+conditional on — a merchant running "Filters only" would otherwise be reading a
+Search tab full of controls that do nothing — so it sits in its own highlighted
+card above the tab strip on Settings, and again at the top of the Dashboard.
+
+It saves on its own, with its own `intent`, rather than waiting for the page's
+Save button: it lives outside the main settings form (HTML forms cannot nest,
+and the tab panels are one large form), and changing it is one action rather
+than "change, scroll, Save". `app/components/mode.tsx` is the shared component;
+both routes render it and handle the same intent.
+
+Everything else only applies to the half that is turned on. A block placed by
+hand in the theme editor keeps working either way, since placing it is already
+an explicit choice.
+
+### The four tabs
+
+Panels are hidden with CSS rather than unmounted, so edits made on one tab
+survive a save made from another. Each tab has its own live preview showing only
+what that tab controls.
 
 ### Search tab
 
-Mode (search / filters / both), theme search-box takeover, search-page
-takeover, recommendations, recent searches, voice search, typo tolerance,
-semantic search, out-of-stock visibility, minimum characters, maximum
-suggestions, panel style, results layout, preview side, and the panel's
-colours, font size and weight.
+**Behaviour**
+
+| Setting | Values |
+|---|---|
+| Upgrade my theme's search box with instant results | on/off |
+| Use our results on the theme's `/search` page | on/off |
+| Show filters and instant results on collection pages | on/off |
+| Show recommendations when the search box is empty | on/off |
+| Remember each shopper's recent searches | on/off |
+| Typo tolerance (fuzzy matching) | on/off |
+| Let shoppers search by voice | on/off |
+| Min characters to trigger | 1–4 |
+| Max product suggestions | 3–12 |
+
+**Relevance** — search language (stemming dictionary), semantic search (Pro,
+where configured), include out-of-stock products.
+
+**Layout** — panel style (spotlight / dropdown), results layout (rich two-pane
+or simple list), preview side.
+
+**Appearance** — accent, panel background, text, highlight colours; font size and
+weight. These paint the search panel.
 
 ### Filters tab
 
-Who draws collection product cards (section 7), filter layout (sidebar /
-toolbar / drawer / inline), button shape, button and active colours, facet
-counts, and the colour-swatch map.
+**Collection pages**
+
+| Setting | Values |
+|---|---|
+| Who draws the product cards | **Automatic** · Always my theme's · Always this app's |
+| Set my own page width | on/off, max width 600–2400px, side padding 0–120px |
+| Set how many products fit in a row | on/off, desktop 1–6, mobile 1–4 |
+
+**Filter appearance**
+
+| Setting | Values |
+|---|---|
+| Where filters appear | sidebar · toolbar · drawer · always open |
+| Filter button shape | pill · rounded · square |
+| Button background / text | colour |
+| Selected background / text | colour |
+| Hover background / text | colour |
+| Show product counts beside values | on/off |
+
+**Colour swatches** — a `value = colour` map so swatch facets render real
+colours. Accepts a colour token or an `https` image URL, capped at 300 entries.
 
 ### Product cards tab
 
-Products per page, cards per row on **desktop and mobile**, and — when the app
-draws the cards — image shape, fixed image height, image fill, card outline,
-hover effect, background, alignment, radius, padding, gap, title size/weight/
-colour/line clamp, price size/weight/colour, and the add-to-cart button's
-label, colours, radius and full-width toggle.
+**Results page** — products per page (12–48), cards per row on desktop (2–5) and
+mobile (1–4), show brand name, add to cart from results.
 
-Each tab has its own live preview showing only what that tab controls.
+**Product card appearance** (only when this app draws the cards)
+
+| Group | Settings |
+|---|---|
+| Image | shape (square / portrait / landscape / wide / natural), fixed height 0–600px, fill (crop or fit) |
+| Card | outline (none / border / shadow), hover (none / zoom / lift), background, text alignment, corner radius, inner padding, gap between cards |
+| Title | size, weight, colour, maximum lines (1–4) |
+| Price | size, weight, colour |
+| Button | label text, corner radius, background, text colour, full-width |
+
+Font *family* always comes from the theme — that is what stops a card reading as
+a widget dropped onto the page.
 
 ### Advanced tab
 
-Search language (stemming dictionary), auto-sync, and revenue tracking (Web
-Pixel install/removal).
+**Keeping the index current** — nightly catalog re-check.
+**Revenue tracking** — install or remove the Web Pixel, and diagnose exactly why
+it is unavailable when it is (missing scopes vs. a granted-but-failing call).
 
 ---
 
-## 7. The theme-cards trade-off
+## 7. The four filter layouts
+
+Genuinely distinct behaviours, not four names for one thing.
+
+| Layout | Behaviour |
+|---|---|
+| **Sidebar** (default) | A column beside the grid with a **FILTERS** heading level with the product count and sort control. Groups start **collapsed**; several can be open at once. Becomes a drawer on phones. |
+| **Toolbar** | A row of dropdown buttons above the grid. Closed by default; the open panel **floats over the products** rather than pushing them down. One open at a time; closes on outside click or Escape. |
+| **Drawer** | Behind a Filters button at every width. Title bar, close button, backdrop, focus trap, Escape, and outside-click all handled. |
+| **Always open** | Facets permanently expanded, stacked above the grid. |
+
+Both the results page and the collection page implement all four, and both
+render the same appearance settings.
+
+---
+
+## 8. The theme-cards trade-off
 
 The most important design constraint in the app.
 
 Shopify's Section Rendering API can only be filtered by Shopify's **native**
-filter parameters (`filter.p.vendor`, `filter.v.option.<name>`, …), and those
-are ignored unless the merchant has enabled the matching filter in Search &
-Discovery. So a theme-rendered grid can only honour filters Shopify already
-knows about. The app's own grid is filtered by the app's index, so every facet
-works — but the cards are the app's, not the theme's.
+filter parameters (`filter.p.vendor`, `filter.v.option.<name>`, …), and those are
+ignored unless the merchant enabled the matching filter in Search & Discovery. So
+a theme-rendered grid can only honour filters Shopify already knows about. The
+app's own grid is filtered by the app's index, so every facet works — but the
+cards are the app's, not the theme's.
 
 These are mutually exclusive, so the merchant chooses:
 
@@ -201,17 +292,43 @@ up from product links and picks the element with the most direct children that
 each contain one. A named-selector list only ever covers themes someone thought
 to add.
 
-Add to cart mirrors the theme's own product form — it copies the hidden fields
-from `form[action*="/cart/add"]`, posts `FormData` (not JSON) to the
-locale-aware cart route, requests bundled section rendering so the theme
-re-renders its own drawer and count bubble, then opens the drawer via the custom
-element's `open()`, an attribute-based toggle, or a broad set of events cart apps
-listen for. It never clicks an `<a href="/cart">` — that would navigate the
-shopper away from their results.
+---
+
+## 9. Add to cart
+
+Shared with AnotherDev Shoppable Video, so both apps behave identically inside a
+merchant's theme. Two rules the implementation is built around:
+
+1. **Once `/cart/add.js` resolves, the add is committed and irreversible.**
+   Nothing after that point may surface as an error — a shopper told "Error"
+   after a successful add will click again and buy two.
+2. **The theme's `renderContents()` is not a black box.** Dawn removes
+   `is-empty` from `.drawer__inner`, but Liquid stamps that class on the
+   `<cart-drawer>` host, so on the 0→1 add the drawer opens with line items
+   hidden. Hand off to the theme, then repair what it misses.
+
+Four tiers, by capability detection and never theme-name sniffing:
+
+1. **Native** — `<cart-notification>` / `<cart-drawer>` exposing
+   `renderContents()`. Which element exists already mirrors the merchant's
+   `cart_type` setting.
+2. **Section-rendered** — a `<cart-drawer>` inside a Shopify section with no
+   `renderContents` (Symmetry / Clean Canvas family): re-render that section,
+   inject the fresh HTML, open it.
+3. **Legacy** — the theme's own ajax cart, only where we can populate it.
+4. **Fallback** — our own confirmation toast, so feedback is never absent.
+
+Other details that matter: requests go through the official `/cart/add.js`
+endpoint so third-party carts (GoKwik, Shiprocket, Rebuy, Swym) that patch
+`fetch` keep working; every request is locale-aware via `Shopify.routes.root`;
+there is a 15s timeout so a patched `fetch` can never strand the button on
+"Adding…"; adds are serialised so two clicks cannot paint a stale drawer; and
+after a handoff the app **verifies** a cart actually opened before deciding
+whether to show its own confirmation.
 
 ---
 
-## 8. Theme app extension
+## 10. Theme app extension
 
 `extensions/anotherdev-search/`
 
@@ -231,7 +348,7 @@ attribution.
 
 ---
 
-## 9. Plans
+## 11. Plans
 
 Defined in `app/lib/plans.ts` — deliberately free of server imports so the
 pricing page can render it in the browser.
@@ -245,18 +362,18 @@ pricing page can render it in the browser.
 | AI product feed | — | — | Yes | Yes |
 | Semantic search | — | — | Yes | Yes |
 
-Every gate reads a **capability** from this table, never a plan name, so adding
-a tier does not mean hunting for `=== "pro"` checks. Plan-name strings in
+Every gate reads a **capability** from this table, never a plan name, so adding a
+tier does not mean hunting for `=== "pro"` checks. Plan-name strings in
 `shopify.server.ts` must match the Display name of the matching plan in the
-Developer Dashboard exactly — managed pricing names a subscription after the
+Developer Dashboard **exactly** — managed pricing names a subscription after the
 display name, and `billing.check()` matches on that name.
 
-`Shop.planOverride` pins a plan with no Shopify charge, for support and
-testing. Set it from the admin (operator shops only) or with `npm run plan`.
+`Shop.planOverride` pins a plan with no Shopify charge, for support and testing.
+Set it from the admin (operator shops only) or with `npm run plan`.
 
 ---
 
-## 10. Environment variables
+## 12. Environment variables
 
 **Required**
 
@@ -289,7 +406,7 @@ testing. Set it from the admin (operator shops only) or with `npm run plan`.
 
 ---
 
-## 11. Development
+## 13. Development
 
 ```bash
 npm install
@@ -310,8 +427,9 @@ git push                 # server → Railway
 npx shopify app deploy   # theme extension + app config → Shopify
 ```
 
-A change to `extensions/**` needs the second one. Pushing alone will not update
-the storefront.
+A change under `extensions/**` needs the second one. Pushing alone will not
+update the storefront — this is the single most common reason a change "did not
+appear".
 
 ### Schema changes
 
@@ -321,47 +439,64 @@ exist". Always generate a migration.
 
 ---
 
-## 12. Things that will bite you
+## 14. Things that will bite you
+
+**Storefront**
 
 - **A `<script>` in Section Rendering HTML does not execute** when inserted with
-  `innerHTML`. Themes rely on custom elements re-running `connectedCallback`
-  instead.
+  `innerHTML`. Themes rely on custom elements re-running `connectedCallback`.
 - **Bundled section rendering is capped at five sections.**
-- **CSS specificity in the extension.** A layout override written as
-  `.a.b .btn` (0,3,0) silently beat both the base rule and `.btn.is-active`
-  (0,2,0), which made every filter-appearance setting appear to do nothing in
-  the default sidebar layout.
-- **Function declarations inside a block** fail `no-inner-declarations` in CI.
-  Use function expressions in the extension's ES5 code.
+- **CSS specificity in the extension.** A layout override written as `.a.b .btn`
+  (0,3,0) silently beat both the base rule and `.btn.is-active` (0,2,0), which
+  made every filter-appearance setting appear to do nothing in the default
+  sidebar layout. Put shared colours on the *base* rule; let layout rules change
+  geometry only.
+- **`display: block` beats `[hidden]`.** Forcing it on a facet panel made every
+  group permanently open.
+- **Function declarations inside a block** fail `no-inner-declarations`, and an
+  empty `catch {}` fails `no-empty`. Both are errors in CI.
 - **`/collections/all` is virtual.** No product is a member of it, so scoping a
-  search to the handle `all` returns nothing. Treat it as an unscoped browse.
-- **Locale-prefixed storefronts.** Never hardcode `/cart/add.js` or parse a
-  handle by path segment index — use `Shopify.routes.root` and a regex.
+  search to the handle `all` returns nothing.
+- **Locale-prefixed storefronts.** Never hardcode `/cart/add.js` or `/products/…`
+  — use `Shopify.routes.root`, and never parse a handle by path segment index.
+- **The two card renderers are separate code paths.** The results page and the
+  collection page do not share their layout CSS, so a change to one does not
+  reach the other.
+
+**Server / admin**
+
 - **Bulk JSONL only contains fields you selected.** A nested connection without
   `id` produces lines the parser cannot route, and they are dropped silently.
 - **Server-only modules must not be reachable from a component**, or the build
   fails with "Server-only module referenced by client".
-- **`s-page` only spaces its direct `s-section` children.** A wrapper in between
-  collapses the gaps.
+- **`s-page` and `s-stack` only space their DIRECT children.** Every wrapper you
+  add between them and an `s-section` kills the gaps, and the wrapper has to
+  supply them itself.
+- **A Polaris component can typecheck and still render nothing.**
+  `s-button-group` passes both `tsc` and Shopify's own validator, and renders its
+  children as nothing in the live admin.
 
 ---
 
-## 13. Compliance and data
+## 15. Compliance and data
 
-Read-only scopes; no customer identifiers stored; the only per-shopper value is
-a random browser-generated token, nulled after 24 hours. All three Shopify
-compliance webhooks are implemented, and `shop/redact` purges everything for the
-store. Full detail in [PRIVACY.md](PRIVACY.md).
+Read-only catalog scopes; no customer identifiers stored; the only per-shopper
+value is a random browser-generated token, nulled after 24 hours. All three
+Shopify compliance webhooks are implemented, and `shop/redact` purges everything
+for the store. Full detail in [PRIVACY.md](PRIVACY.md).
 
 ---
 
-## 14. Known gaps
+## 16. Known gaps
 
 - `DEPLOY.md` documents Fly.io; the app runs on Railway.
 - `parseBulkJsonl` has no unit test — it lives in a Prisma-importing module and
   would need extracting first.
 - The cart integration is reasoned from Shopify's documentation and theme
-  conventions, not verified against a large sample of live themes. Themes that
-  expose a drawer only through a class toggle will update the cart but not open.
+  conventions plus live testing on Dawn and Symmetry, not verified across a large
+  sample of themes. A theme exposing its drawer only through a class toggle will
+  update the cart but not slide open.
 - Annual billing is only purchasable through the App Store pricing page; the
   in-app upgrade button always creates a monthly charge.
+- The results page and collection page duplicate their filter-layout CSS rather
+  than sharing it.

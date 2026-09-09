@@ -20,6 +20,7 @@ import {
   PIXEL_SCOPES,
 } from "../lib/pixel.server";
 import { TILES, useSaveToast } from "../components/ui";
+import { ModeCard } from "../components/mode";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing, admin } = await authenticate.admin(request);
@@ -57,6 +58,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // call to Shopify, not a column, and it must not be silently coupled to
   // pressing Save on an unrelated colour change.
   const intent = String(f.get("intent") ?? "");
+
+  // The storefront mode saves on its own: it lives outside the settings form
+  // (see components/mode.tsx), so it arrives as its own submission.
+  if (intent === "mode") {
+    const settings = mergeSettings(shop.settings, { mode: String(f.get("mode") ?? "") });
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: { settings: settings as unknown as Prisma.InputJsonObject },
+    });
+    invalidateShopConfig(shop.id);
+    return { ok: true };
+  }
+
   if (intent === "pixelOn" || intent === "pixelOff") {
     const result =
       intent === "pixelOn" ? await ensureWebPixel(admin) : await removeWebPixel(admin);
@@ -327,7 +341,9 @@ export default function SettingsPage() {
   const s = settings;
   const busy = fetcher.state !== "idle";
   useSaveToast(fetcher, "Settings saved");
+  const modeFetcher = useFetcher<typeof action>();
   useSaveToast(pixelFetcher, "Revenue tracking updated");
+  useSaveToast(modeFetcher, "Storefront mode updated");
 
   /* Four tabs rather than eleven stacked cards. Every panel stays MOUNTED and
      is hidden with CSS: unmounting one would drop its inputs from the form,
@@ -411,6 +427,8 @@ export default function SettingsPage() {
         <s-text color="subdued">Storefront: {domain}</s-text>
       </s-section>
 
+      <ModeCard mode={s.mode} fetcher={modeFetcher} />
+
       {/* Tabs and everything they switch live inside ONE bordered container, so
           it is visually obvious that the cards below belong to the selected tab.
           A detached row of buttons above loose cards read as four unrelated
@@ -464,16 +482,6 @@ export default function SettingsPage() {
         <Panel show={tab === "search"}>
         <s-section heading="Behaviour">
           <s-stack direction="block" gap="base">
-            <s-select name="mode" label="What this app runs on your storefront" value={s.mode}>
-              <s-option value="both">Search and filters</s-option>
-              <s-option value="search">Search only</s-option>
-              <s-option value="filters">Filters only</s-option>
-            </s-select>
-            <s-text color="subdued">
-              The switches below only apply to the half you have turned on. A
-              block you placed by hand in the theme editor keeps working either
-              way, since placing it is already an explicit choice.
-            </s-text>
             <Check name="autoAttach" checked={s.autoAttach} label="Upgrade my theme's search box with instant results" />
             <Check name="searchTakeover" checked={s.searchTakeover} label="Use our results on the theme's /search page (recommended)" />
             <Check name="collectionFilters" checked={s.collectionFilters} label="Show filters and instant results on collection pages" />

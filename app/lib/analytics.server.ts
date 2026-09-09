@@ -183,6 +183,63 @@ export interface AnalyticsSummary {
  * previously hardcoded 30 days, so Free saw more history than it was sold and
  * Pro saw less.
  */
+/** One ranked list: the term as shoppers typed it, and how often. */
+export interface TermCount {
+  term: string;
+  count: number;
+}
+
+/**
+ * The two lists the dashboard shows, and nothing else.
+ *
+ * getAnalytics() answers nine questions in nine queries; the dashboard needs
+ * two of them. Running the full summary to render one panel would put eight
+ * unused aggregates on the critical path of the page merchants open most.
+ */
+export async function getSearchActivity(
+  shopId: string,
+  windowDays: number,
+  limit = 25,
+): Promise<{ top: TermCount[]; zero: TermCount[] }> {
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+  const [top, zero] = await Promise.all([
+    prisma.$queryRaw<{ term: string; count: bigint }[]>`
+      SELECT "normalized" AS term, COUNT(*)::bigint AS count
+      FROM "SearchEvent"
+      WHERE "shopId" = ${shopId} AND "createdAt" >= ${since} AND "normalized" <> ''
+      GROUP BY "normalized"
+      ORDER BY count DESC
+      LIMIT ${limit}`,
+
+    prisma.$queryRaw<{ term: string; count: bigint }[]>`
+      SELECT "normalized" AS term, COUNT(*)::bigint AS count
+      FROM "SearchEvent"
+      WHERE "shopId" = ${shopId} AND "createdAt" >= ${since}
+        AND "resultsCount" = 0 AND "normalized" <> ''
+      GROUP BY "normalized"
+      ORDER BY count DESC
+      LIMIT ${limit}`,
+  ]);
+
+  const rows = (r: { term: string; count: bigint }[]) =>
+    r.map((x) => ({ term: x.term, count: Number(x.count) }));
+
+  return { top: rows(top), zero: rows(zero) };
+}
+
+/** Two columns of term counts as a CSV, for the dashboard's Export buttons. */
+export function termsToCsv(rows: TermCount[]): string {
+  const cell = (v: string | number) => {
+    const t = String(v);
+    // Quote anything a spreadsheet would otherwise split or reinterpret.
+    return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  return ["term,searches"]
+    .concat(rows.map((r) => cell(r.term) + "," + cell(r.count)))
+    .join("\n");
+}
+
 export async function getAnalytics(
   shopId: string,
   windowDays: number,

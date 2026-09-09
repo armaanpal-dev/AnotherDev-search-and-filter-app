@@ -1,5 +1,6 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useFetcher } from "react-router";
+import { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -10,12 +11,42 @@ import { DEFAULT_PROXY_BASE } from "../lib/proxy.server";
 // The shared primitives exist so seven pages cannot drift into seven looks.
 // This page used to define its own Stat, Card and column templates alongside
 // them, which is exactly the drift they were introduced to prevent.
-import { Stat, Card, TILES, CARDS } from "../components/ui";
+import { Stat, Card, TILES, CARDS, useSaveToast } from "../components/ui";
+import { ModeCard } from "../components/mode";
+import { resolveSettings, mergeSettings } from "../lib/settings";
+import { getSearchActivity, termsToCsv } from "../lib/analytics.server";
+import {
+  SearchActivity,
+  RANGE_DAYS,
+  isActivityRange,
+  type ActivityRange,
+} from "../components/search-activity";
+import { invalidateShopConfig } from "../lib/search/config.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = await getShopByDomain(session.shop);
   const { plan, limits } = await getPlanStatus(billing, shop?.planOverride);
+
+  const url = new URL(request.url);
+  const rangeParam = url.searchParams.get("range");
+  const range: ActivityRange = isActivityRange(rangeParam) ? rangeParam : "month";
+
+  // Export is the same loader with a different Accept, rather than its own
+  // route: the query and the window are already resolved here, and a second
+  // route would have to duplicate both to stay in step with what is on screen.
+  const exportList = url.searchParams.get("export");
+  if (shop && (exportList === "top" || exportList === "zero")) {
+    const activity = await getSearchActivity(shop.id, RANGE_DAYS[range], 500);
+    const rows = exportList === "top" ? activity.top : activity.zero;
+    const name = exportList === "top" ? "top-searches" : "no-results";
+    return new Response(termsToCsv(rows), {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${name}-${range}.csv"`,
+      },
+    });
+  }
 
   // Deep link into the theme editor with our app embed already switched on, so
   // step 2 is one click instead of a hunt through Theme settings. Shopify's
@@ -47,6 +78,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     revenue7d: 0,
     currency: "",
     embedActivated: false,
+    mode: "both" as const,
+    range,
+    topTerms: [] as { term: string; count: number }[],
+    zeroTerms: [] as { term: string; count: number }[],
     plan,
     aiFeed: limits.aiFeed,
     themeEditorUrl,
@@ -55,7 +90,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!shop) return empty;
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [productCount, syncState, searches7d, zeroCount, clicks7d, revenue] =
+  const [productCount, syncState, searches7d, zeroCount, clicks7d, revenue, activity] =
     await Promise.all([
       prisma.product.count({ where: { shopId: shop.id } }),
       prisma.syncState.findUnique({ where: { shopId: shop.id } }),
@@ -68,6 +103,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: { shopId: shop.id, createdAt: { gte: since }, purchased: true },
         _sum: { revenue: true },
       }),
+      // In the same round trip as the headline numbers, so the panel costs the
+      // dashboard no extra latency.
+      getSearchActivity(shop.id, RANGE_DAYS[range]),
     ]);
 
   // Step 2 is the one a merchant most often thinks they did and did not. A
@@ -91,7 +129,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     revenue7d: revenue._sum.revenue ?? 0,
     currency: shop.currencyCode ?? "",
     embedActivated,
+    mode: resolveSettings(shop.settings).mode,
+    range,
+    topTerms: activity.top,
+    zeroTerms: activity.zero,
   };
+};
+
+/**
+ * The dashboard only saves one thing: the storefront mode.
+ *
+ * It is repeated here rather than linked to because it is the switch that
+ * decides whether the app does anything at all — the first question a merchant
+ * asks on landing, and the one they come back to change.
+ */
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const shop = await getShopByDomain(session.shop);
+  if (!shop) return { ok: false, error: "Shop not initialised." };
+
+  const f = await request.formData();
+  if (String(f.get("intent") ?? "") !== "mode") return null;
+
+  const settings = mergeSettings(shop.settings, { mode: String(f.get("mode") ?? "") });
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: { settings: settings as unknown as Prisma.InputJsonObject },
+  });
+  invalidateShopConfig(shop.id);
+  return { ok: true };
 };
 
 // One line each. The dashboard is a map, not a manual.
@@ -108,6 +174,8 @@ const PAGES: { href: string; title: string; blurb: string; pro?: boolean }[] = [
 
 export default function Dashboard() {
   const d = useLoaderData<typeof loader>();
+  const modeFetcher = useFetcher<typeof action>();
+  useSaveToast(modeFetcher, "Storefront mode updated");
   const ctr = d.searches7d ? Math.round((d.clicks7d / d.searches7d) * 1000) / 10 : 0;
   const money = (n: number) =>
     n
@@ -119,6 +187,16 @@ export default function Dashboard() {
       <s-button slot="primary-action" href="/app/sync" variant="primary">
         {d.synced ? "Manage index" : "Run first sync"}
       </s-button>
+
+      <ModeCard mode={d.mode} fetcher={modeFetcher} />
+
+      <SearchActivity
+        range={d.range}
+        top={d.topTerms}
+        zero={d.zeroTerms}
+        rangeHref={(r) => `/app?range=${r}`}
+        exportHref={(list) => `/app?range=${d.range}&export=${list}`}
+      />
 
       {!d.synced && (
         <s-banner tone="warning" heading="Your catalog is not indexed yet">
