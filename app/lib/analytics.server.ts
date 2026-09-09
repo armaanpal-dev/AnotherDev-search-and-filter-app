@@ -230,14 +230,16 @@ export async function getSearchActivity(
 
 /** Two columns of term counts as a CSV, for the dashboard's Export buttons. */
 export function termsToCsv(rows: TermCount[]): string {
-  const cell = (v: string | number) => {
-    const t = String(v);
-    // Quote anything a spreadsheet would otherwise split or reinterpret.
-    return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
-  };
-  return ["term,searches"]
-    .concat(rows.map((r) => cell(r.term) + "," + cell(r.count)))
-    .join("\n");
+  // csvCell, NOT a local quote-escaper. Search terms are typed by anonymous
+  // shoppers, and Excel and Sheets execute any cell beginning with = + - @ as a
+  // formula — so a search for =HYPERLINK("http://…") would become a live link in
+  // the merchant's spreadsheet. csvCell prefixes those with an apostrophe as
+  // well as doubling quotes; a plain quote-escaper leaves the hole wide open.
+  // CRLF for the same reason analyticsToCsv uses it: Excel expects it.
+  return [["term", "searches"]]
+    .concat(rows.map((r) => [r.term, String(r.count)]))
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n");
 }
 
 export async function getAnalytics(

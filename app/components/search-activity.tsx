@@ -140,46 +140,39 @@ export function SearchActivity({
   range,
   top,
   zero,
+  maxDays,
   rangeHref,
   exportHref,
 }: {
   range: ActivityRange;
   top: TermRow[];
   zero: TermRow[];
+  /** The plan's analytics window. Ranges beyond it are not offered. */
+  maxDays: number;
   /** Where a range tab points. */
   rangeHref: (r: ActivityRange) => string;
   /** Where an Export button points, per list. */
   exportHref: (list: "top" | "zero") => string;
 }) {
+  // Free is sold 7 days of history. Offering a Month tab to every plan would
+  // hand out the paid window for nothing, which is the bug the Analytics page
+  // fixed once already.
+  const offered = (Object.keys(RANGE_LABELS) as ActivityRange[]).filter(
+    (r) => RANGE_DAYS[r] <= maxDays,
+  );
+
   const tabs: ReactNode = (
-    <div
-      role="tablist"
-      aria-label="Search activity range"
-      style={{ display: "flex", gap: 4 }}
-    >
-      {(Object.keys(RANGE_LABELS) as ActivityRange[]).map((r) => {
-        const on = r === range;
-        return (
-          <a
-            key={r}
-            role="tab"
-            aria-selected={on}
-            href={rangeHref(r)}
-            style={{
-              textDecoration: "none",
-              color: "inherit",
-              font: "inherit",
-              fontWeight: on ? 600 : 450,
-              padding: "0.35rem 0.8rem",
-              borderRadius: 8,
-              background: on ? "rgba(128,128,128,.18)" : "transparent",
-            }}
-          >
-            {RANGE_LABELS[r]}
-          </a>
-        );
-      })}
-    </div>
+    <s-stack direction="inline" gap="small-300">
+      {offered.map((r) => (
+        <s-button
+          key={r}
+          href={rangeHref(r)}
+          variant={r === range ? "primary" : "secondary"}
+        >
+          {RANGE_LABELS[r]}
+        </s-button>
+      ))}
+    </s-stack>
   );
 
   return (

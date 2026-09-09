@@ -30,14 +30,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const url = new URL(request.url);
   const rangeParam = url.searchParams.get("range");
-  const range: ActivityRange = isActivityRange(rangeParam) ? rangeParam : "month";
+  const requested: ActivityRange = isActivityRange(rangeParam) ? rangeParam : "month";
+  // The plan owns the window. Free is sold 7 days, so a "month" request from a
+  // Free shop resolves down rather than quietly handing over the paid history —
+  // the same clamp the Analytics page applies.
+  const range: ActivityRange =
+    RANGE_DAYS[requested] <= limits.analyticsDays ? requested : "week";
+  const activityDays = Math.min(RANGE_DAYS[range], limits.analyticsDays);
 
   // Export is the same loader with a different Accept, rather than its own
   // route: the query and the window are already resolved here, and a second
   // route would have to duplicate both to stay in step with what is on screen.
   const exportList = url.searchParams.get("export");
   if (shop && (exportList === "top" || exportList === "zero")) {
-    const activity = await getSearchActivity(shop.id, RANGE_DAYS[range], 500);
+    const activity = await getSearchActivity(shop.id, activityDays, 500);
     const rows = exportList === "top" ? activity.top : activity.zero;
     const name = exportList === "top" ? "top-searches" : "no-results";
     return new Response(termsToCsv(rows), {
@@ -80,6 +86,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     embedActivated: false,
     mode: "both" as const,
     range,
+    maxDays: limits.analyticsDays,
     topTerms: [] as { term: string; count: number }[],
     zeroTerms: [] as { term: string; count: number }[],
     plan,
@@ -105,7 +112,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }),
       // In the same round trip as the headline numbers, so the panel costs the
       // dashboard no extra latency.
-      getSearchActivity(shop.id, RANGE_DAYS[range]),
+      getSearchActivity(shop.id, activityDays),
     ]);
 
   // Step 2 is the one a merchant most often thinks they did and did not. A
@@ -131,6 +138,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     embedActivated,
     mode: resolveSettings(shop.settings).mode,
     range,
+    maxDays: limits.analyticsDays,
     topTerms: activity.top,
     zeroTerms: activity.zero,
   };
@@ -190,12 +198,16 @@ export default function Dashboard() {
 
       <ModeCard mode={d.mode} fetcher={modeFetcher} />
 
+      {/* Relative, query-only hrefs, matching the Analytics range picker: an
+          absolute /app path inside the embedded iframe is a full document
+          navigation rather than the app's own. */}
       <SearchActivity
         range={d.range}
         top={d.topTerms}
         zero={d.zeroTerms}
-        rangeHref={(r) => `/app?range=${r}`}
-        exportHref={(list) => `/app?range=${d.range}&export=${list}`}
+        maxDays={d.maxDays}
+        rangeHref={(r) => `?range=${r}`}
+        exportHref={(list) => `?range=${d.range}&export=${list}`}
       />
 
       {!d.synced && (

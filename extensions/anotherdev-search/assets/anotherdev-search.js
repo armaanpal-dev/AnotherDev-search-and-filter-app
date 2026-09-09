@@ -1123,6 +1123,16 @@
    * never counts a sold-out failure as an add-to-cart.
    */
   function addToCartFromButton(button, cfg, onAdded) {
+    /* Everything that runs AFTER the add is committed goes through here.
+       onAdded is a caller-supplied callback and done() touches the DOM; either
+       throwing would reject the chain and land in failed(), painting "Unavailable"
+       over a successful add — the exact double-purchase bug rule 1 forbids. */
+    function settle(label, notify) {
+      if (notify && onAdded) {
+        try { onAdded(); } catch (e) { /* analytics must not break the cart */ }
+      }
+      try { done(label); } catch (e) { /* the button may already be gone */ }
+    }
     if (!button || cartAddInFlight) return;
 
     var variantId = variantIdOf(button.getAttribute("data-adsf-add"));
@@ -1172,8 +1182,7 @@
             showCartToast({ ok: true }); // theme threw, but the item IS added
           }
           getCart().then(function (cart) { if (cart) broadcastCartUpdate(cart); });
-          if (onAdded) onAdded();
-          done("Added");
+          settle("Added", true);
         })
         .catch(function (err) { failed(err); });
       return;
@@ -1201,8 +1210,7 @@
       // ===== COMMITTED past this point: presentation only, never throw =====
       .then(function (res) {
         if (res.handled) {
-          if (onAdded) onAdded();
-          done("Added");
+          settle("Added", true);
           return;
         }
         return getCart().then(function (cart) {
@@ -1220,8 +1228,7 @@
           } catch (presentErr) {
             // Already in the cart; a presentation hiccup must not read as error.
           }
-          if (onAdded) onAdded();
-          done("Added");
+          settle("Added", true);
         });
       })
       .catch(function (err) { failed(err); });

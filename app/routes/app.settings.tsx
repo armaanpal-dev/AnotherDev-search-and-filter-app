@@ -98,7 +98,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // reset the missing ones (resultsPerPage, gridColumns, showVendor,
   // recentSearches, collectionFilters) to their defaults on every save.
   const settings = mergeSettings(shop.settings, {
-    mode: field("mode"),
+    // mode is deliberately absent: it saves through its own intent above, and
+    // this form no longer renders the field. Listing it here would read as if
+    // the main Save still carried it.
     autoAttach: checkbox("autoAttach"),
     searchTakeover: checkbox("searchTakeover"),
     showRecommendations: checkbox("showRecommendations"),
