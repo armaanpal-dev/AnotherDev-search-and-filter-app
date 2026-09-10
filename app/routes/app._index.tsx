@@ -347,17 +347,20 @@ export default function Dashboard() {
               <s-link href="/app/plans">See Pro</s-link>
             )}
           </Card>
-          <Card
-            title="Search to revenue"
-            badge={d.pixelActive ? "Active" : "Included"}
-            tone={d.pixelActive ? "success" : "info"}
-          >
-            <s-text color="subdued">
-              Clicks, add-to-carts and completed orders attributed back to the search
-              that caused them.
-            </s-text>
-            <s-link href="/app/analytics">Open Analytics</s-link>
-          </Card>
+          {/* Same rule as the revenue tile above: nothing about revenue on this
+              page until the pixel is actually installed. Until then it is a
+              card describing a number that does not exist. The feature is still
+              introduced — and switched on — in Settings > Advanced, which is
+              where someone goes looking for it. */}
+          {d.pixelActive && (
+            <Card title="Search to revenue" badge="Active" tone="success">
+              <s-text color="subdued">
+                Clicks, add-to-carts and completed orders attributed back to the search
+                that caused them.
+              </s-text>
+              <s-link href="/app/analytics">Open Analytics</s-link>
+            </Card>
+          )}
         </s-grid>
       </s-section>
 

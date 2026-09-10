@@ -925,3 +925,30 @@ body.adsf-collection-active .collection__filters { display: none !important; }
     grid-template-columns: repeat(var(--adsf-coll-cols-mobile, 2), minmax(0, 1fr)) !important;
   }
 }
+
+/* ---- Dismissable rows in the dropdown ---------------------------------
+   A row is the anchor plus its remove button. The button only appears on
+   hover or keyboard focus, so a list of eight recent searches is not a wall
+   of crosses — but it is always in the DOM, so it is reachable by tab and
+   announced by a screen reader. */
+.adsf-dropdown__row { display: flex; align-items: center; }
+.adsf-dropdown__row > .adsf-dropdown__suggestion { flex: 1 1 auto; min-width: 0; }
+.adsf-dropdown__remove {
+  flex: none; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 1.15em; line-height: 1;
+  padding: 0 0.6rem; color: inherit; opacity: 0;
+  transition: opacity .12s ease;
+}
+.adsf-dropdown__row:hover .adsf-dropdown__remove,
+.adsf-dropdown__row:focus-within .adsf-dropdown__remove,
+.adsf-dropdown__remove:focus-visible { opacity: 0.55; }
+.adsf-dropdown__remove:hover { opacity: 1; }
+/* The section heading holds its own dismiss, pushed to the far end. */
+.adsf-dropdown__label--dismissable {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+}
+.adsf-dropdown__label--dismissable .adsf-dropdown__remove { opacity: 0.45; }
+.adsf-dropdown__label--dismissable .adsf-dropdown__remove:hover { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .adsf-dropdown__remove { transition: none; }
+}

@@ -47,42 +47,42 @@ export function ModeCard({
 
   return (
     <s-section heading={heading}>
-      <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
-        <s-stack direction="block" gap="base">
-          <s-stack direction="inline" gap="small-500" alignItems="center">
-            <s-text type="strong">Currently</s-text>
-            <s-badge tone="success">{MODE_LABELS[mode]}</s-badge>
-          </s-stack>
-          <s-text color="subdued">{MODE_BLURBS[mode]}</s-text>
+      {/* No s-box and no s-grid around the select.
+          Both wrappers were here and the select rendered COMPLETELY BLANK in
+          the live admin, while every other s-select in this app — all of them
+          direct children of an s-stack inside an s-section — renders fine. The
+          option labels were not the cause (making them literal text changed
+          nothing). Rather than guess at which wrapper breaks the slotting, this
+          now matches the proven shape exactly. */}
+      <s-stack direction="block" gap="base">
+        <s-stack direction="inline" gap="small-500" alignItems="center">
+          <s-text type="strong">Currently</s-text>
+          <s-badge tone="success">{MODE_LABELS[mode]}</s-badge>
+        </s-stack>
+        <s-text color="subdued">{MODE_BLURBS[mode]}</s-text>
 
-          <fetcher.Form method="post">
+        <fetcher.Form method="post">
+          <s-stack direction="block" gap="base">
             <input type="hidden" name="intent" value="mode" />
-            <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="end">
-              {/* Option labels are LITERAL text, not {MODE_LABELS.x}.
-                  s-option takes its label from its text content when it
-                  registers with the select, and a JSX expression child is
-                  committed as a separate text-node insertion — which rendered
-                  the whole select blank. Every other s-select in this app uses
-                  literal children, and every one of them works. MODE_LABELS
-                  still drives the badge above, where a dynamic child is fine. */}
-              <s-select name="mode" label="Change this" value={mode}>
-                <s-option value="both">Search and filters</s-option>
-                <s-option value="search">Search only</s-option>
-                <s-option value="filters">Filters only</s-option>
-              </s-select>
+            <s-select name="mode" label="Change this" value={mode}>
+              <s-option value="both">Search and filters</s-option>
+              <s-option value="search">Search only</s-option>
+              <s-option value="filters">Filters only</s-option>
+            </s-select>
+            <s-stack direction="inline" gap="base">
               <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>
                 Apply
               </s-button>
-            </s-grid>
-          </fetcher.Form>
+            </s-stack>
+          </s-stack>
+        </fetcher.Form>
 
-          <s-text color="subdued">
-            Everything else in Settings only applies to the half you have turned
-            on. A block you placed by hand in the theme editor keeps working
-            either way, since placing it is already an explicit choice.
-          </s-text>
-        </s-stack>
-      </s-box>
+        <s-text color="subdued">
+          Everything else in Settings only applies to the half you have turned
+          on. A block you placed by hand in the theme editor keeps working
+          either way, since placing it is already an explicit choice.
+        </s-text>
+      </s-stack>
     </s-section>
   );
 }

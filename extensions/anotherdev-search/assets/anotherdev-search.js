@@ -197,6 +197,33 @@
 
   // Recent searches, per shopper, local only.
   var RECENT_KEY = "adsf_recent";
+  /** Drop one term from this shopper’s recent list. */
+  function forgetRecent(term) {
+    try {
+      var list = recentSearches().filter(function (t) { return t !== term; });
+      localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+    } catch (e) {
+      // Private mode: nothing was stored, so nothing to forget.
+    }
+  }
+
+  /* Trending is the shop’s data, not the shopper’s, so there is nothing to
+     delete — but a shopper who does not want it should not have to keep
+     looking at it. Hiding it is per-browser and reversible by clearing site
+     data, exactly like the recent list. */
+  var HIDE_TRENDING_KEY = "adsf_hide_trending";
+  function trendingHidden() {
+    try { return localStorage.getItem(HIDE_TRENDING_KEY) === "1"; }
+    catch (e) { return false; }
+  }
+  function hideTrending() {
+    try {
+      localStorage.setItem(HIDE_TRENDING_KEY, "1");
+    } catch (e) {
+      // Private mode: the panel still closes, it just reappears next visit.
+    }
+  }
+
   function recentSearches() {
     try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); }
     catch (e) { return []; }
@@ -316,6 +343,10 @@
     var hasPages = data.pages && data.pages.length;
     var recent = isEmpty && cfg.recentSearches !== false ? recentSearches() : [];
     var suggestions = (data.suggestions || []).slice();
+    // A shopper who dismissed trending should not see it again next time.
+    // AFTER the declaration above, not before it: `var` hoists, so assigning
+    // here first and declaring second silently threw the assignment away.
+    if (isEmpty && trendingHidden()) suggestions = [];
     var hasSugg = suggestions.length || recent.length;
 
     if (!hasProducts && !hasColl && !hasPages && !hasSugg) {
@@ -348,20 +379,51 @@
         '<a class="adsf-preview__link" href="/products/' + esc(p.handle) + '">See details</a>';
     }
 
-    function section(label) {
+    /** The small × that removes a row or a whole section. */
+    function dismissButton(label, onDismiss) {
+      var x = el("button", "adsf-dropdown__remove");
+      x.type = "button";
+      x.setAttribute("aria-label", label);
+      x.innerHTML = "&times;";
+      // mousedown, not click: the input’s blur handler closes the panel
+      // before a click would ever land. preventDefault keeps focus where
+      // it is so the dropdown stays open while the shopper prunes.
+      x.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        onDismiss();
+      });
+      return x;
+    }
+
+    function section(label, onDismiss) {
       var wrap = el("div", "adsf-dropdown__section");
-      wrap.appendChild(el("div", "adsf-dropdown__label", esc(label)));
+      var head = el("div", "adsf-dropdown__label", esc(label));
+      if (onDismiss) {
+        head.classList.add("adsf-dropdown__label--dismissable");
+        head.appendChild(
+          dismissButton("Hide " + label, function () {
+            onDismiss();
+            wrap.remove();
+          }),
+        );
+      }
+      wrap.appendChild(head);
       list.appendChild(wrap);
       return wrap;
     }
 
     // Each focusable row is an ARIA option so a screen reader announces it as
     // part of the combobox rather than as loose links after the input.
-    function addOption(container, node) {
+    // `wrapper`, when given, is what gets appended, while `node` stays the
+    // thing keyboard navigation moves between. A row with a remove button
+    // needs both: a button inside an <a> is invalid, so the two are
+    // siblings in a wrapper and only the anchor is the option.
+    function addOption(container, node, wrapper) {
       node.setAttribute("role", "option");
       node.id = "adsf-opt-" + items.length;
       node.setAttribute("aria-selected", "false");
-      container.appendChild(node);
+      container.appendChild(wrapper || node);
       items.push(node);
       return node;
     }
@@ -372,12 +434,26 @@
         var a = el("a", "adsf-dropdown__suggestion");
         a.href = cfg.resultsUrl + "?q=" + encodeURIComponent(s);
         a.innerHTML = '<svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>' + esc(s) + "</span>";
-        addOption(rg, a);
+        var row = el("div", "adsf-dropdown__row");
+        row.appendChild(a);
+        row.appendChild(
+          dismissButton("Remove " + s + " from recent searches", function () {
+            forgetRecent(s);
+            row.remove();
+            // An empty heading left behind reads as a bug.
+            if (!rg.querySelector(".adsf-dropdown__row")) rg.remove();
+          }),
+        );
+        addOption(rg, a, row);
       });
     }
 
     if (suggestions.length) {
-      var sg = section(isEmpty ? "Trending searches" : "Suggestions");
+      // Only the trending list is dismissable: "Suggestions" are a response
+      // to what the shopper just typed, not a standing list.
+      var sg = isEmpty
+        ? section("Trending searches", hideTrending)
+        : section("Suggestions");
       suggestions.forEach(function (s) {
         var a = el("a", "adsf-dropdown__suggestion");
         a.href = cfg.resultsUrl + "?q=" + encodeURIComponent(s);

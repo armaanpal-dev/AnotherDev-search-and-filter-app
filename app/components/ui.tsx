@@ -86,7 +86,16 @@ export function Row({ children, actions }: { children: ReactNode; actions?: Reac
   return (
     <s-box padding="base" borderWidth="base" borderRadius="base">
       {actions ? (
-        <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+        /* auto-fit, NOT "1fr auto": inside a narrow column the actions took
+           their max-content width and squeezed the text to about 60px, so a
+           term like "show me some shirt" broke one word per line. auto-fit
+           drops the actions onto their own row when there is no space for
+           both, and the term gets the full width. */
+        <s-grid
+          gridTemplateColumns="repeat(auto-fit, minmax(240px, 1fr))"
+          gap="base"
+          alignItems="center"
+        >
           <s-stack direction="block" gap="small-500">{children}</s-stack>
           <s-stack direction="inline" gap="small-500" alignItems="center">
             {actions}
