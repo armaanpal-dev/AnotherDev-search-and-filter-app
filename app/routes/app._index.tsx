@@ -6,6 +6,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
+import { getPixelState } from "../lib/pixel.server";
 import { PLAN_LIMITS } from "../lib/plans";
 import { DEFAULT_PROXY_BASE } from "../lib/proxy.server";
 // The shared primitives exist so seven pages cannot drift into seven looks.
@@ -24,7 +25,7 @@ import {
 import { invalidateShopConfig } from "../lib/search/config.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session, billing } = await authenticate.admin(request);
+  const { session, billing, admin } = await authenticate.admin(request);
   const shop = await getShopByDomain(session.shop);
   const { plan, limits } = await getPlanStatus(billing, shop?.planOverride);
 
@@ -89,6 +90,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     revenue7d: 0,
     currency: "",
     embedActivated: false,
+    // A shop with no record cannot have a pixel, so no call is needed here.
+    pixelActive: false,
     mode: "both" as const,
     range,
     maxDays: limits.analyticsDays,
@@ -102,7 +105,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!shop) return empty;
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [productCount, syncState, searches7d, zeroCount, clicks7d, revenue, activity] =
+  const [productCount, syncState, searches7d, zeroCount, clicks7d, revenue, activity, pixel] =
     await Promise.all([
       prisma.product.count({ where: { shopId: shop.id } }),
       prisma.syncState.findUnique({ where: { shopId: shop.id } }),
@@ -118,6 +121,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // In the same round trip as the headline numbers, so the panel costs the
       // dashboard no extra latency.
       getSearchActivity(shop.id, activityDays),
+      // Whether the Web Pixel is installed — the only honest answer to "is
+      // revenue being tracked". Earning nothing in seven days is not the same
+      // as not measuring, and the dashboard used to conflate the two.
+      getPixelState(admin),
     ]);
 
   // Step 2 is the one a merchant most often thinks they did and did not. A
@@ -141,6 +148,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     revenue7d: revenue._sum.revenue ?? 0,
     currency: shop.currencyCode ?? "",
     embedActivated,
+    pixelActive: pixel.state === "active",
     mode: resolveSettings(shop.settings).mode,
     range,
     maxDays: limits.analyticsDays,
@@ -236,12 +244,17 @@ export default function Dashboard() {
               : {})}
           />
           <Stat label="Click-through" value={`${ctr}%`} />
-          <Stat
-            label="Search revenue"
-            value={money(d.revenue7d)}
-            hint={d.revenue7d ? undefined : "Needs the pixel"}
-            href="/app/analytics"
-          />
+          {/* Only shown once the pixel is installed. A revenue tile reading
+              "—" on every store that has not turned it on is a permanently
+              broken-looking number; the Search visibility card below is where
+              the feature is introduced instead. */}
+          {d.pixelActive && (
+            <Stat
+              label="Search revenue"
+              value={money(d.revenue7d)}
+              href="/app/analytics"
+            />
+          )}
           <Stat label="Plan" value={PLAN_LIMITS[d.plan].name} href="/app/plans" />
         </s-grid>
       </s-section>
@@ -336,8 +349,8 @@ export default function Dashboard() {
           </Card>
           <Card
             title="Search to revenue"
-            badge={d.revenue7d ? "Active" : "Included"}
-            tone={d.revenue7d ? "success" : "info"}
+            badge={d.pixelActive ? "Active" : "Included"}
+            tone={d.pixelActive ? "success" : "info"}
           >
             <s-text color="subdued">
               Clicks, add-to-carts and completed orders attributed back to the search
