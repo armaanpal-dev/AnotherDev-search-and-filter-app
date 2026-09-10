@@ -19,6 +19,23 @@ interface ProviderConfig {
   model: string;
 }
 
+/**
+ * Where the embeddings API lives.
+ *
+ * Voyage was acquired by MongoDB, who serve the same API from their own host
+ * for keys issued there — so a key can be perfectly valid and still 401 against
+ * api.voyageai.com. The host is therefore a config value, not a constant: a
+ * merchant or operator moving hosts is an env change, not a code change.
+ *
+ * Only the ORIGIN is configurable. If a provider ever changes the path as well,
+ * that is a real API change and belongs in code where it can be reviewed.
+ */
+function apiBase(provider: Provider): string {
+  const override = process.env.EMBEDDINGS_BASE_URL;
+  if (override) return override.replace(/\/+$/, "");
+  return provider === "openai" ? "https://api.openai.com" : "https://api.voyageai.com";
+}
+
 function providerConfig(): ProviderConfig | null {
   if (process.env.SEMANTIC_SEARCH_ENABLED !== "true") return null;
   const provider = (process.env.EMBEDDINGS_PROVIDER ?? "voyage") as Provider;
@@ -114,7 +131,7 @@ async function callProvider(
   inputType: InputType,
 ): Promise<number[][]> {
   if (cfg.provider === "openai") {
-    const res = await fetch("https://api.openai.com/v1/embeddings", {
+    const res = await fetch(apiBase("openai") + "/v1/embeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -131,7 +148,7 @@ async function callProvider(
     return (json.data ?? []).map((d: any) => d.embedding as number[]);
   }
 
-  const res = await fetch("https://api.voyageai.com/v1/embeddings", {
+  const res = await fetch(apiBase("voyage") + "/v1/embeddings", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -219,7 +236,7 @@ export async function embedImage(
   if (!cfg || cfg.provider !== "voyage") return null;
 
   try {
-    const res = await fetch("https://api.voyageai.com/v1/multimodalembeddings", {
+    const res = await fetch(apiBase("voyage") + "/v1/multimodalembeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -259,7 +276,7 @@ async function embedDocuments(
   }
 
   try {
-    const res = await fetch("https://api.voyageai.com/v1/multimodalembeddings", {
+    const res = await fetch(apiBase("voyage") + "/v1/multimodalembeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

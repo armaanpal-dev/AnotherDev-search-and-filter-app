@@ -124,6 +124,8 @@ const FEATURES: { label: string; on: (k: PlanKey) => boolean | string }[] = [
   { label: "Rule scheduling and A/B tests", on: (k) => PLAN_LIMITS[k].merchandising },
   { label: "Search redirects", on: (k) => PLAN_LIMITS[k].redirects },
   { label: "AI product feed", on: (k) => PLAN_LIMITS[k].aiFeed },
+  { label: "Priority support", on: (k) => PLAN_LIMITS[k].prioritySupport },
+  { label: "Dedicated point of contact", on: (k) => PLAN_LIMITS[k].dedicatedContact },
 ];
 
 // Order comes from the plan table so a new tier appears here automatically.

@@ -25,6 +25,8 @@ export const PLAN_LIMITS = {
     redirects: false,
     aiFeed: false,
     semantic: false,
+    prioritySupport: false,
+    dedicatedContact: false,
   },
   growth: {
     name: "Growth",
@@ -35,6 +37,8 @@ export const PLAN_LIMITS = {
     redirects: true,
     aiFeed: false,
     semantic: false,
+    prioritySupport: false,
+    dedicatedContact: false,
   },
   pro: {
     name: "Pro",
@@ -45,6 +49,8 @@ export const PLAN_LIMITS = {
     redirects: true,
     aiFeed: true,
     semantic: true,
+    prioritySupport: false,
+    dedicatedContact: false,
   },
   custom: {
     name: "Custom",
@@ -58,6 +64,10 @@ export const PLAN_LIMITS = {
     redirects: true,
     aiFeed: true,
     semantic: true,
+    // Not code-enforced: a support commitment, listed so the pricing
+    // page and the App Store listing say the same thing.
+    prioritySupport: true,
+    dedicatedContact: true,
   },
 } as const;
 
