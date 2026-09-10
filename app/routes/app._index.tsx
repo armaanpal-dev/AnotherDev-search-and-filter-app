@@ -73,6 +73,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     results: `https://${session.shop}${DEFAULT_PROXY_BASE}/results`,
     aiFeed: `https://${session.shop}${DEFAULT_PROXY_BASE}/ai`,
     llms: `https://${session.shop}${DEFAULT_PROXY_BASE}/llms`,
+    // The path alone, for the redirect instructions on the card. It has to come
+    // through the loader: DEFAULT_PROXY_BASE lives in a server-only module, and
+    // referencing it from the component would put that module in the client
+    // bundle and fail the build.
+    llmsPath: `${DEFAULT_PROXY_BASE}/llms`,
   };
 
   const empty = {
@@ -293,9 +298,37 @@ export default function Dashboard() {
               plus an llms.txt telling them the feed exists.
             </s-text>
             {d.aiFeed ? (
-              <s-stack direction="inline" gap="base">
-                <s-link href={d.storefront.aiFeed} target="_blank">View feed</s-link>
-                <s-link href={d.storefront.llms} target="_blank">llms.txt</s-link>
+              <s-stack gap="base">
+                <s-stack direction="inline" gap="base">
+                  <s-link href={d.storefront.aiFeed} target="_blank">View feed</s-link>
+                  <s-link href={d.storefront.llms} target="_blank">llms.txt</s-link>
+                </s-stack>
+                {/* The convention agents look for is /llms.txt at the root, and an
+                    app with read-only scopes cannot create that redirect itself —
+                    so the merchant has to, and needs telling how. Without it the
+                    document only exists on the proxy subpath, where nothing but
+                    the link on the results page will ever find it.
+
+                    The warning is not boilerplate. A redirect at /llms.txt SHADOWS
+                    whatever was there, so a merchant who already publishes one —
+                    their own, or another app's — would silently lose it by
+                    following this advice. The app cannot overwrite that file (it
+                    holds no write scope for it), which is exactly why the one way
+                    it could be lost has to be called out where the instruction
+                    is, not buried in documentation. */}
+                <s-text color="subdued">
+                  Optional: to publish it at the address agents look for, add a URL
+                  redirect in Shopify &mdash; <s-text type="strong">Online Store
+                  &rsaquo; Navigation &rsaquo; URL redirects</s-text>, from
+                  <s-text type="strong"> /llms.txt</s-text> to
+                  <s-text type="strong"> {d.storefront.llmsPath}</s-text>.
+                </s-text>
+                <s-text color="subdued">
+                  <s-text type="strong">Already have an /llms.txt?</s-text> Skip the
+                  redirect &mdash; it would take that address over. Add a link to the
+                  feed inside your existing file instead. This app never edits or
+                  replaces any file on your store.
+                </s-text>
               </s-stack>
             ) : (
               <s-link href="/app/plans">See Pro</s-link>

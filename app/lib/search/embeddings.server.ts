@@ -36,6 +36,38 @@ function apiBase(provider: Provider): string {
   return provider === "openai" ? "https://api.openai.com" : "https://api.voyageai.com";
 }
 
+/**
+ * POST to the embeddings provider, retrying the failures that are worth retrying.
+ *
+ * A document batch asks the provider to fetch every product image, which is
+ * heavy enough to trip rate limiting — a live sync returned 429 on the very
+ * first batch and, because nothing retried, the whole catalog ended with no
+ * vectors at all. 429 and 5xx are transient by definition; 4xx of any other
+ * kind is a bad request and retrying it just wastes time and quota.
+ *
+ * Honours Retry-After when the provider sends one, since it knows better than
+ * a fixed backoff does.
+ */
+async function postWithRetry(
+  url: string,
+  init: RequestInit,
+  attempts = 3,
+): Promise<Response> {
+  let last: Response | null = null;
+  for (let i = 0; i < attempts; i++) {
+    const res = await fetch(url, init);
+    if (res.ok || (res.status !== 429 && res.status < 500)) return res;
+    last = res;
+    if (i === attempts - 1) break;
+    const header = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(header) && header > 0
+      ? Math.min(header * 1000, 15_000)
+      : 1_000 * 2 ** i; // 1s, 2s, 4s
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+  return last as Response;
+}
+
 function providerConfig(): ProviderConfig | null {
   if (process.env.SEMANTIC_SEARCH_ENABLED !== "true") return null;
   const provider = (process.env.EMBEDDINGS_PROVIDER ?? "voyage") as Provider;
@@ -131,7 +163,7 @@ async function callProvider(
   inputType: InputType,
 ): Promise<number[][]> {
   if (cfg.provider === "openai") {
-    const res = await fetch(apiBase("openai") + "/v1/embeddings", {
+    const res = await postWithRetry(apiBase("openai") + "/v1/embeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -148,7 +180,7 @@ async function callProvider(
     return (json.data ?? []).map((d: any) => d.embedding as number[]);
   }
 
-  const res = await fetch(apiBase("voyage") + "/v1/embeddings", {
+  const res = await postWithRetry(apiBase("voyage") + "/v1/embeddings", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -211,7 +243,7 @@ async function callMultimodalText(
   texts: string[],
   inputType: InputType,
 ): Promise<number[][]> {
-  const res = await fetch(apiBase("voyage") + "/v1/multimodalembeddings", {
+  const res = await postWithRetry(apiBase("voyage") + "/v1/multimodalembeddings", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -279,7 +311,7 @@ export async function embedImage(
   if (!cfg || cfg.provider !== "voyage") return null;
 
   try {
-    const res = await fetch(apiBase("voyage") + "/v1/multimodalembeddings", {
+    const res = await postWithRetry(apiBase("voyage") + "/v1/multimodalembeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -319,7 +351,7 @@ async function embedDocuments(
   }
 
   try {
-    const res = await fetch(apiBase("voyage") + "/v1/multimodalembeddings", {
+    const res = await postWithRetry(apiBase("voyage") + "/v1/multimodalembeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -384,8 +416,12 @@ export async function embedPendingProducts(
   opts: { batchSize?: number; maxBatches?: number } = {},
 ): Promise<number> {
   if (!(await semanticReady())) return 0;
-  const batchSize = opts.batchSize ?? 64;
-  const maxBatches = opts.maxBatches ?? 40;
+  // A multimodal batch makes the provider fetch one image per row, so 64 at a
+  // time is what tripped the rate limiter. Text-only batches are cheap and stay
+  // large; the batch count budget grows to match so the catalog still finishes.
+  const multimodal = multimodalEnabled();
+  const batchSize = opts.batchSize ?? (multimodal ? 8 : 64);
+  const maxBatches = opts.maxBatches ?? (multimodal ? 320 : 40);
   let done = 0;
 
   for (let i = 0; i < maxBatches; i++) {

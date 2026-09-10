@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getSearchEngine } from "../lib/search/index.server";
 import { getShopByDomain } from "../lib/shop.server";
+import { limitsForPlanName } from "../lib/plans";
 import { recordSearchEvent } from "../lib/analytics.server";
 import { resolveSettings } from "../lib/settings";
 import {
@@ -78,6 +79,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const cards = result.hits.map((h) => productCard(h, settings.showVendor)).join("\n");
   const jsonLd = buildItemListJsonLd(term, result.hits, session.shop, page, perPage);
+  // Only advertise the machine feed on a plan that actually serves it, or every
+  // agent that follows the advice gets a 402.
+  const hasAiFeed = limitsForPlanName(shop.planName).aiFeed;
+  const agentJsonLd = buildAgentJsonLd(session.shop, base, hasAiFeed);
   // Every link on this page is built from this, never from request.url.
   const linkParams = shopperParams({ term, sort, filters, price, collection });
   const pagination = buildPagination(linkParams, base, page, totalPages);
@@ -142,14 +147,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
   var r=document.createElement("meta"); r.name="robots"; r.content=${JSON.stringify(robots)};
   var oldR=head.querySelector('meta[name="robots"]'); if(oldR) oldR.remove();
   head.appendChild(r);
+  var oldL=head.querySelector('link[rel="alternate"][type="text/plain"]'); if(oldL) oldL.remove();
+  var ll=document.createElement("link"); ll.rel="alternate"; ll.type="text/plain";
+  ll.href=${JSON.stringify(`https://${session.shop}${base}/llms`)}; ll.title="llms.txt";
+  head.appendChild(ll);
   ${page > 1 ? `var pv=document.createElement("link"); pv.rel="prev"; pv.href=${JSON.stringify(pageUrl(linkParams, base, page - 1))}; head.appendChild(pv);` : ""}
   ${page < totalPages ? `var nx=document.createElement("link"); nx.rel="next"; nx.href=${JSON.stringify(pageUrl(linkParams, base, page + 1))}; head.appendChild(nx);` : ""}
 }catch(e){}})();
 </script>`;
 
+  // A real anchor, not just a <link> in the head.
+  //
+  // llms.txt is only useful if something points at it, and nothing did: the
+  // canonical URL sat on the proxy subpath with no inbound link anywhere on the
+  // storefront, so no crawler could reach it. A head <link> injected by script
+  // does not help either — the crawlers that matter here parse the served HTML
+  // without running JS. One followable link in the body is what makes the
+  // document discoverable at all.
+  const agentFooter = `<p class="adsf-results__agents">
+    <a href="${esc(`${base}/llms`)}" rel="alternate" type="text/plain">Structured catalog for AI agents</a>
+  </p>`;
+
   const body = `
 <div class="adsf-results" data-total="${result.total}" data-adsf-seo-results>
   <script type="application/ld+json">${jsonLd}</script>
+  <script type="application/ld+json">${agentJsonLd}</script>
   ${headTags}
   <h1 class="adsf-results__heading">${heading}</h1>
   <p class="adsf-results__count">${result.total} result${result.total === 1 ? "" : "s"}</p>
@@ -167,6 +189,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? `<ul class="adsf-results__grid">${cards}</ul>${pagination}`
       : emptyState
   }
+  ${agentFooter}
 </div>
 <style>
   .adsf-results{max-width:1200px;margin:0 auto;padding:1rem}
@@ -183,6 +206,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   .adsf-results__presets a{font-size:.85rem;padding:.3rem .75rem;border:1px solid currentColor;border-radius:999px;text-decoration:none;color:inherit;opacity:.85}
   .adsf-results__empty{padding:2rem 0;line-height:1.7}
   .adsf-results__clear{font-weight:600}
+  .adsf-results__agents{margin:2.5rem 0 0;font-size:.75rem;opacity:.5;text-align:center}
+  .adsf-results__agents a{color:inherit}
   .adsf-results__pagination{display:flex;gap:.5rem;justify-content:center;margin:2rem 0}
   .adsf-results__pagination a,.adsf-results__pagination span{padding:.4rem .7rem;border:1px solid #ddd;border-radius:6px;text-decoration:none;color:inherit}
   .adsf-results__pagination [aria-current="page"]{background:#111;color:#fff;border-color:#111}
@@ -391,6 +416,56 @@ function buildItemListJsonLd(
   // Then `<` -> < on the output, so a `</script>` inside any string cannot
   // close the block early.
   return JSON.stringify(defuseLiquidDeep(itemList)).replace(/</g, "\\u003c");
+}
+
+/**
+ * Tell an agent, in the one format every crawler already parses, that this store
+ * has a query API.
+ *
+ * schema.org `SearchAction` is the standard way to say "here is how to search
+ * me", and it costs nothing extra: the crawler is reading the JSON-LD on this
+ * page regardless. That matters more than llms.txt does, because llms.txt is a
+ * convention a crawler has to know to look for, whereas structured data is
+ * something they all already consume. Both are emitted; this is the one likely
+ * to be read.
+ *
+ * The HTML entry point is listed first and unconditionally — it works on every
+ * plan. The JSON one is added only where the AI feed is actually served.
+ *
+ * `contentType` must be what the route actually SENDS. /ai replies through
+ * jsonCors as application/json, so claiming application/ld+json here would be a
+ * promise the server does not keep, and an agent that content-negotiates on it
+ * would discard a perfectly good response.
+ */
+function buildAgentJsonLd(
+  shopDomain: string,
+  base: string,
+  hasAiFeed: boolean,
+): string {
+  const origin = `https://${shopDomain}`;
+  const action = (path: string, contentType: string) => ({
+    "@type": "SearchAction",
+    target: {
+      "@type": "EntryPoint",
+      urlTemplate: `${origin}${base}${path}?q={search_term_string}`,
+      contentType,
+    },
+    "query-input": "required name=search_term_string",
+  });
+
+  const site = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    url: origin,
+    potentialAction: [
+      action("/results", "text/html"),
+      ...(hasAiFeed ? [action("/ai", "application/json")] : []),
+    ],
+  };
+  // Nothing here is shopper-controlled — every value is the shop domain or a
+  // literal we wrote — but the same two escapes apply on principle, so a future
+  // edit that DOES interpolate input cannot quietly become an injection.
+  return JSON.stringify(defuseLiquidDeep(site)).replace(/</g, "\\u003c");
 }
 
 function buildPagination(

@@ -11,6 +11,67 @@ reference behind the published privacy policy.
 
 ---
 
+## 0. Current status — 10 September 2026
+
+Where the app actually stands, as distinct from what it is designed to do.
+Update this section when any row changes; a reference that quietly goes stale is
+worse than none.
+
+| Area | Status |
+|---|---|
+| Hosting | Railway, service `anotherdev-search` in project `divine-empathy` |
+| Public URL | `https://search.anotherdev.in` — custom domain, certificate issued |
+| Database | Supabase Postgres, `ap-southeast-1` |
+| Shopify config | `application_url`, `redirect_urls` and `[app_proxy] url` all point at the custom domain |
+| Scopes | Catalog read-only, plus `write_pixels` + `read_customer_events` for the revenue pixel |
+| App Store | **Not submitted.** Listing copy drafted; icon, screenshots and demo store outstanding |
+
+### Semantic search and search by photo — configured, not yet working
+
+Enabled on the deployment, but **no product has an embedding yet**, so neither
+feature returns anything. The remaining step is a catalog sync on a build that
+contains the fixes below.
+
+| Gate | State |
+|---|---|
+| `SEMANTIC_SEARCH_ENABLED`, provider, key | set |
+| Provider | Voyage AI **hosted by MongoDB** — `EMBEDDINGS_BASE_URL=https://ai.mongodb.com` |
+| `pgvector` column | present |
+| Plan (`pro`) and the per-shop toggle | both on |
+| Product vectors | **0 of 31** |
+
+Three bugs were found in this path, in order, each hidden by the one before it:
+
+1. **Wrong host.** A MongoDB-issued Voyage key is rejected by `api.voyageai.com`
+   with a 403 that names the reason. Fixed by making the origin configurable.
+2. **Wrong endpoint for the model.** `voyage-multimodal-3` only exists on
+   `/v1/multimodalembeddings`; `/v1/embeddings` rejects it with a 400. Every
+   query embedding failed, and so did the document fallback — which is why the
+   count was zero rather than partial. Fixed by routing text through the
+   multimodal endpoint whenever multimodal is on, which also keeps queries and
+   documents in the *same vector space* — embedding them with different model
+   families would have produced meaningless distances rather than an error.
+3. **Rate limiting.** A 64-row document batch asks the provider to fetch 64
+   product images and returned 429. Nothing retried, so one throttle lost the
+   whole catalog. Fixed with backoff (honouring `Retry-After`) and a multimodal
+   batch size of 8.
+
+`"show me some shirt"` is the regression test: keyword search cannot answer it,
+because `websearch_to_tsquery` ANDs the filler words and no product title
+contains "show". When it returns *The Essential Confidence Shirt*, semantic
+search is live.
+
+### Before submission
+
+- Rotate three exposed credentials: the Shopify API secret, the Supabase
+  database password, and the Voyage API key.
+- Upload a 1024×1024 PNG icon and 3–6 screenshots.
+- Confirm the demo store has this app installed, the embed enabled and a
+  completed sync.
+- Set `OPERATOR_SHOPS` if the in-admin plan override is wanted in production.
+
+---
+
 ## 1. What it does
 
 Replaces a Shopify theme's built-in product search with an index the app owns,
@@ -500,3 +561,7 @@ for the store. Full detail in [PRIVACY.md](PRIVACY.md).
   in-app upgrade button always creates a monthly charge.
 - The results page and collection page duplicate their filter-layout CSS rather
   than sharing it.
+- The embeddings backfill reports nothing on success. A sync that embedded 31
+  products and one that skipped the step entirely both print "Finishing up…",
+  which is why the three bugs in section 0 took several rounds to find. Surfacing
+  the count on the Index page would make the next failure self-evident.
