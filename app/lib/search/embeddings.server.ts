@@ -178,11 +178,54 @@ export async function embed(
   const cfg = providerConfig();
   if (!cfg || texts.length === 0) return null;
   try {
+    /* Multimodal and text models are NOT interchangeable, in two ways that both
+       bite:
+
+       1. They live on different endpoints. /v1/embeddings rejects
+          voyage-multimodal-3 outright — "Model voyage-multimodal-3 is not
+          supported" — so every query embedding was a hard 400.
+       2. They produce different vector spaces. When multimodal is on, product
+          documents are embedded through the multimodal endpoint; a query
+          embedded by a text model would not be comparable to them, and every
+          cosine distance would be noise rather than meaning.
+
+       So the choice of endpoint has to follow multimodalEnabled(), not the call
+       site. Routing here means embedQuery and every other caller inherit it. */
+    if (multimodalEnabled() && cfg.provider === "voyage") {
+      return await callMultimodalText(cfg, texts, inputType);
+    }
     return await callProvider(cfg, texts, inputType);
   } catch (e: any) {
     console.error("[embeddings] batch failed:", e?.message);
     return null;
   }
+}
+
+/**
+ * Text through the multimodal endpoint, so text queries land in the same space
+ * as the multimodal product vectors. The content array is the multimodal
+ * endpoint's input shape; a text-only block is a perfectly valid member of it.
+ */
+async function callMultimodalText(
+  cfg: ProviderConfig,
+  texts: string[],
+  inputType: InputType,
+): Promise<number[][]> {
+  const res = await fetch(apiBase("voyage") + "/v1/multimodalembeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${cfg.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      inputs: texts.map((t) => ({ content: [{ type: "text", text: t.slice(0, 4000) }] })),
+      input_type: inputType,
+    }),
+  });
+  if (!res.ok) throw new Error(`Voyage multimodal text ${res.status}`);
+  const json: { data?: { embedding?: number[] }[] } = await res.json();
+  return (json.data ?? []).map((d) => d.embedding as number[]);
 }
 
 // Query embeddings are the hot path: the same handful of terms repeat all day,
