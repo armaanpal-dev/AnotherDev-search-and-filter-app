@@ -3,7 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopByDomain } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
-import { BILLING_PLAN_BY_KEY, type PlanKey } from "../lib/billing.server";
+import { planKeyFromSubscriptionName, type PlanKey } from "../lib/billing.server";
 
 /**
  * app_subscriptions/update — the merchant's plan changed.
@@ -23,14 +23,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // merchant approval), CANCELLED, EXPIRED, FROZEN and DECLINED all mean the
   // shop drops to Free. The subscription NAME decides which paid tier it is.
   const named = String(sub?.name ?? "");
-  // Resolved from the plan table rather than a chain of comparisons, so a new
-  // tier is recognised the moment it is added to BILLING_PLAN_BY_KEY.
-  const match = (Object.entries(BILLING_PLAN_BY_KEY) as [PlanKey, string][]).find(
-    ([, billingPlan]) => billingPlan === named,
-  );
+  // Tolerant of how the plan's Display name is actually spelled in the Partner
+  // Dashboard — see planKeyFromSubscriptionName. An exact comparison also read
+  // the Free plan's own subscription as unrecognised, which upgraded a merchant
+  // who had just downgraded.
+  const match = planKeyFromSubscriptionName(named);
   // An unrecognised name still means the shop is paying for something, so the
   // entry tier is the floor. Never drop a paying merchant to Free here.
-  const paid: PlanKey = match ? match[0] : "growth";
+  const paid: PlanKey = match ?? "growth";
   const plan = status === "ACTIVE" ? paid : "free";
 
   const shopRow = await getShopByDomain(shop);

@@ -7,8 +7,7 @@ import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
-import { csvCell } from "../lib/analytics.server";
-import { Row, Empty, Card, useSaveToast } from "../components/ui";
+import { Row, Empty, Card, ExportCsvButton, useSaveToast } from "../components/ui";
 
 const ids = (v: FormDataEntryValue | null) =>
   String(v || "")
@@ -32,8 +31,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { limits } = await getPlanStatus(billing, shop.planOverride);
   const isPro = limits.merchandising;
 
-  const url = new URL(request.url);
-
   const [rules, redirects, syncState] = await Promise.all([
     prisma.merchandisingRule.findMany({
       where: { shopId: shop.id },
@@ -48,18 +45,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       select: { optionNames: true },
     }),
   ]);
-
-  if (url.searchParams.get("export") === "redirects") {
-    const rows = [["query", "url", "active"]].concat(
-      redirects.map((r) => [r.query, r.url, String(r.active)]),
-    );
-    return new Response(rows.map((r) => r.map(csvCell).join(",")).join("\r\n"), {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="redirects.csv"`,
-      },
-    });
-  }
 
   // The four states a rule can be in, resolved on the server.
   //
@@ -272,14 +257,14 @@ export default function MerchandisingPage() {
   if (!isPro) {
     return (
       <s-page heading="Merchandising">
-        <s-banner tone="info" heading="Merchandising is a Pro feature">
+        <s-banner tone="info" heading="Merchandising is on the paid plans">
           <s-paragraph>
             Pin products to the top of results, boost or bury by relevance, hide products,
             schedule a rule for a sale window, A/B test two strategies, and set search
-            redirects. Upgrade to Pro to unlock these controls.
+            redirects. Growth, Pro and Custom all include these controls.
           </s-paragraph>
           <s-button slot="primary-action" href="/app/plans" variant="primary">
-            See Pro plan
+            See plans
           </s-button>
         </s-banner>
       </s-page>
@@ -450,7 +435,12 @@ export default function MerchandisingPage() {
               Take your redirects with you, or edit them in a spreadsheet and paste
               them back.
             </s-text>
-            <s-link href="?export=redirects" download="redirects.csv">Download CSV</s-link>
+            <ExportCsvButton
+              href="/app/export/redirects"
+              filename="redirects.csv"
+            >
+              Download CSV
+            </ExportCsvButton>
           </Card>
         </s-grid>
       </s-section>

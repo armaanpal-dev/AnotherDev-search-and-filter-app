@@ -4,9 +4,9 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
-import { getAnalytics, analyticsToCsv } from "../lib/analytics.server";
+import { getAnalytics } from "../lib/analytics.server";
 import { getPixelState } from "../lib/pixel.server";
-import { Stat, Row, Bar, Empty, Card, TILES, WIDE } from "../components/ui";
+import { Stat, Row, Bar, Empty, Card, ExportCsvButton, TILES, WIDE } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing, admin } = await authenticate.admin(request);
@@ -25,15 +25,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : limits.analyticsDays;
 
   const summary = await getAnalytics(shop.id, windowDays);
-
-  if (url.searchParams.get("export") === "csv") {
-    return new Response(analyticsToCsv(summary), {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="search-analytics-${summary.windowDays}d.csv"`,
-      },
-    });
-  }
 
   // Purchase numbers are only meaningful once the pixel is live; without it the
   // revenue tiles would read as "search earns nothing" rather than "not measured
@@ -63,14 +54,11 @@ export default function AnalyticsPage() {
 
   return (
     <s-page heading="Search analytics">
-      <s-button
+      <ExportCsvButton
         slot="primary-action"
-        href={`?export=csv&days=${d.windowDays}`}
-        variant="secondary"
-        download={`search-analytics-${d.windowDays}d.csv`}
-      >
-        Export CSV
-      </s-button>
+        href={`/app/export/analytics?days=${d.windowDays}`}
+        filename={`search-analytics-${d.windowDays}d.csv`}
+      />
 
       <s-section heading={`Last ${d.windowDays} days`}>
         {/* Range picker. The window was previously fixed to the plan's maximum,

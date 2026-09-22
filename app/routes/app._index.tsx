@@ -15,7 +15,7 @@ import { DEFAULT_PROXY_BASE } from "../lib/proxy.server";
 import { Stat, Card, TILES, CARDS, useSaveToast } from "../components/ui";
 import { ModeCard } from "../components/mode";
 import { resolveSettings, mergeSettings } from "../lib/settings";
-import { getSearchActivity, termsToCsv } from "../lib/analytics.server";
+import { getSearchActivity } from "../lib/analytics.server";
 import {
   SearchActivity,
   RANGE_DAYS,
@@ -38,22 +38,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const range: ActivityRange =
     RANGE_DAYS[requested] <= limits.analyticsDays ? requested : "week";
   const activityDays = Math.min(RANGE_DAYS[range], limits.analyticsDays);
-
-  // Export is the same loader with a different Accept, rather than its own
-  // route: the query and the window are already resolved here, and a second
-  // route would have to duplicate both to stay in step with what is on screen.
-  const exportList = url.searchParams.get("export");
-  if (shop && (exportList === "top" || exportList === "zero")) {
-    const activity = await getSearchActivity(shop.id, activityDays, 500);
-    const rows = exportList === "top" ? activity.top : activity.zero;
-    const name = exportList === "top" ? "top-searches" : "no-results";
-    return new Response(termsToCsv(rows), {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${name}-${range}.csv"`,
-      },
-    });
-  }
 
   // Deep link into the theme editor with our app embed already switched on, so
   // step 2 is one click instead of a hunt through Theme settings. Shopify's
@@ -182,12 +166,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 // One line each. The dashboard is a map, not a manual.
-const PAGES: { href: string; title: string; blurb: string; pro?: boolean }[] = [
+// `badge` names the cheapest plan that unlocks the page, so it has to come
+// from the plan table's reality: merchandising is sold from Growth up, and
+// badging it "Pro" told Growth merchants they could not use what they had paid
+// for.
+const PAGES: { href: string; title: string; blurb: string; badge?: string }[] = [
   { href: "/app/sync", title: "Index", blurb: "Pull your catalog into the search engine." },
   { href: "/app/preview", title: "Test search", blurb: "See what shoppers get, and why it ranks that way." },
   { href: "/app/filters", title: "Filters", blurb: "Choose the filters shoppers see." },
   { href: "/app/synonyms", title: "Synonyms", blurb: "Teach search that words mean the same thing." },
-  { href: "/app/merchandising", title: "Merchandising", blurb: "Pin, boost, bury, hide, redirect.", pro: true },
+  { href: "/app/merchandising", title: "Merchandising", blurb: "Pin, boost, bury, hide, redirect.", badge: "Growth" },
   { href: "/app/analytics", title: "Analytics", blurb: "Top terms, dead ends, revenue." },
   { href: "/app/plans", title: "Plans", blurb: "Free to 100 products. Pro for the rest." },
   { href: "/app/settings", title: "Settings", blurb: "Behaviour, layout, colours, swatches." },
@@ -220,7 +208,7 @@ export default function Dashboard() {
         zero={d.zeroTerms}
         maxDays={d.maxDays}
         rangeHref={(r) => `?range=${r}`}
-        exportHref={(list) => `?range=${d.range}&export=${list}`}
+        exportHref={(list) => `/app/export/activity?range=${d.range}&list=${list}`}
       />
 
       {!d.synced && (
@@ -371,7 +359,7 @@ export default function Dashboard() {
               <s-stack direction="block" gap="small-500">
                 <s-stack direction="inline" gap="small-500" alignItems="center">
                   <s-text type="strong">{p.title}</s-text>
-                  {p.pro && <s-badge tone="info">Pro</s-badge>}
+                  {p.badge && <s-badge tone="info">{p.badge}</s-badge>}
                 </s-stack>
                 <s-text color="subdued">{p.blurb}</s-text>
               </s-stack>

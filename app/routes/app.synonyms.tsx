@@ -6,8 +6,17 @@ import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
-import { suggestSynonyms, csvCell } from "../lib/analytics.server";
-import { Stat, Card, Row, Empty, TILES, CARDS, useSaveToast } from "../components/ui";
+import { suggestSynonyms } from "../lib/analytics.server";
+import {
+  Stat,
+  Card,
+  Row,
+  Empty,
+  ExportCsvButton,
+  TILES,
+  CARDS,
+  useSaveToast,
+} from "../components/ui";
 
 /** A shop cannot have unlimited rules: every one is another OR group in the
  *  tsquery, and config.server only loads the first 2000 anyway. */
@@ -18,27 +27,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = (await getShopByDomain(session.shop)) ?? (await ensureShop(session.shop));
   const { limits } = await getPlanStatus(billing, shop.planOverride);
 
-  const url = new URL(request.url);
-
   const synonyms = await prisma.synonym.findMany({
     where: { shopId: shop.id },
     orderBy: { createdAt: "desc" },
   });
-
-  // CSV export. Merchants migrating from another search app arrive with
-  // hundreds of these, and leave with them too; a list you cannot get out of the
-  // app is a reason not to try it.
-  if (url.searchParams.get("export") === "csv") {
-    const rows = [["type", "input", "terms"]].concat(
-      synonyms.map((s) => [s.type, s.input ?? "", s.terms.join("|")]),
-    );
-    return new Response(rows.map((r) => r.map(csvCell).join(",")).join("\r\n"), {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="synonyms.csv"`,
-      },
-    });
-  }
 
   // Candidates derived from searches that found nothing. This turns the
   // zero-result list from a list of problems into a list of one-click fixes —
@@ -198,9 +190,11 @@ export default function SynonymsPage() {
 
   return (
     <s-page heading="Synonyms">
-      <s-button slot="primary-action" href="?export=csv" variant="secondary" download="synonyms.csv">
-        Export CSV
-      </s-button>
+      <ExportCsvButton
+        slot="primary-action"
+        href="/app/export/synonyms"
+        filename="synonyms.csv"
+      />
 
       {error && <s-banner tone="critical">{error}</s-banner>}
       {imported ? (

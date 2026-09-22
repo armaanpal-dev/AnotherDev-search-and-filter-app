@@ -86,3 +86,34 @@ export function isPlanKey(v: unknown): v is PlanKey {
 export function limitsForPlanName(planName: string | null | undefined): PlanLimits {
   return isPlanKey(planName) ? PLAN_LIMITS[planName] : PLAN_LIMITS.free;
 }
+
+/** Lowercase, letters and digits only, so "Pro Plan" and "pro" compare equal. */
+function normalizeName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Which tier a Shopify subscription name means.
+ *
+ * Matching cannot be a strict equality test against this table. Under Shopify
+ * App Pricing the subscription is named after the plan's Display name in the
+ * Partner Dashboard, which is edited by a human and drifts: "Pro", "Pro Plan"
+ * and "Pro (Annual)" are all the Pro tier, and an exact comparison reads every
+ * one of them as an unknown plan — which is how a merchant who had just paid
+ * kept seeing Free.
+ *
+ * Tiers are tried highest first so a looser rule on a cheaper tier can never
+ * swallow a more expensive one. Returns null for a name that resembles no tier
+ * at all, which callers treat as "paying for something", never as Free.
+ */
+export function planKeyFromSubscriptionName(name: string): PlanKey | null {
+  const n = normalizeName(name);
+  if (!n) return null;
+  for (const key of [...PLAN_ORDER].reverse()) {
+    const display = normalizeName(PLAN_LIMITS[key].name);
+    if (n === key || n === display || n.startsWith(display) || n.startsWith(key)) {
+      return key;
+    }
+  }
+  return null;
+}

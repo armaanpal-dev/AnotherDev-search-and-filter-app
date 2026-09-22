@@ -424,10 +424,22 @@ pricing page can render it in the browser.
 | Semantic search | — | — | Yes | Yes |
 
 Every gate reads a **capability** from this table, never a plan name, so adding a
-tier does not mean hunting for `=== "pro"` checks. Plan-name strings in
-`shopify.server.ts` must match the Display name of the matching plan in the
-Developer Dashboard **exactly** — managed pricing names a subscription after the
-display name, and `billing.check()` matches on that name.
+tier does not mean hunting for `=== "pro"` checks.
+
+Charging is **Shopify App Pricing**. Plans, prices and trials are configured in
+the Partner Dashboard, Shopify hosts the plan selection page, and this app never
+creates a charge: the Plans page links merchants to that page with
+`target="_top"`, and Shopify asks them to accept or decline. Calling
+`billing.request()` for an app configured this way fails, which is how the
+in-app upgrade button silently did nothing until it was found in App Store
+review (requirement 1.2.2).
+
+Reading the tier back is `billing.check()`, which matches on the subscription's
+name. That name is the plan's Display name from the dashboard, so
+`planKeyFromSubscriptionName()` matches it loosely — "Pro", "Pro Plan" and
+"Pro (Annual)" are all Pro. Subscriptions are read **unfiltered and including
+test ones**; filtering by an exact plan name, or excluding test subscriptions,
+reads a merchant who has just paid as Free.
 
 `Shop.planOverride` pins a plan with no Shopify charge, for support and testing.
 Set it from the admin (operator shops only) or with `npm run plan`.
@@ -451,7 +463,7 @@ Set it from the admin (operator shops only) or with `npm run plan`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SHOPIFY_BILLING_TEST` | inferred from `NODE_ENV` | Force test charges on or off |
+| `SHOPIFY_APP_HANDLE` | `anotherdev-search` | App handle used to build the Shopify App Pricing plan page URL. Must match `handle` in `shopify.app.toml` |
 | `OPERATOR_SHOPS` | empty | Shops allowed to use the plan override. **Empty means nobody, never everybody** |
 | `ANALYTICS_RETENTION_DAYS` | 180 | Search-event retention |
 | `ANALYTICS_SESSION_TOKEN_RETENTION_HOURS` | 24 | How long a session token stays attached to an event |
@@ -557,8 +569,9 @@ for the store. Full detail in [PRIVACY.md](PRIVACY.md).
   conventions plus live testing on Dawn and Symmetry, not verified across a large
   sample of themes. A theme exposing its drawer only through a class toggle will
   update the cart but not slide open.
-- Annual billing is only purchasable through the App Store pricing page; the
-  in-app upgrade button always creates a monthly charge.
+- Monthly and annual billing are both chosen on Shopify's hosted plan page. The
+  in-app plan cards show monthly prices only, so a merchant who wants annual
+  sees that option for the first time after clicking through.
 - The results page and collection page duplicate their filter-layout CSS rather
   than sharing it.
 - The embeddings backfill reports nothing on success. A sync that embedded 31

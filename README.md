@@ -8,6 +8,205 @@ AIO- and CRO-optimized storefront delivery.
 Built on **Postgres** as the single datastore (app config *and* the search index),
 so there is no separate search service to run or pay per-query for.
 
+---
+
+## For reviewers: SoBooster machine test
+
+Instead of a mock over a static dataset, I'm submitting the **production
+Shopify app I built for this exact problem**: search, faceted filters, dynamic
+counts, sorting and URL state. It runs on a real store, over a real catalog
+synced from Shopify. This section maps every test requirement to the code that
+implements it.
+
+### See it running
+
+| | |
+|---|---|
+| Live storefront | `https://<STORE>.myshopify.com/collections/all` (password: `<PASSWORD>`) |
+| Search results page | `https://<STORE>.myshopify.com/search?q=dress` |
+| Walkthrough video | `<VIDEO LINK>` (2 minutes) |
+| App backend | `https://search.anotherdev.in`, deployed on Railway with Supabase Postgres |
+
+Running it locally takes a Shopify Partner account and a dev store (see
+[Local setup](#local-setup)). The live store is the quickest way to evaluate it.
+
+### Requirement → implementation
+
+| Test requirement | Where it lives | Notes |
+|---|---|---|
+| **Search**: title, vendor, product type, tags | [postgres.server.ts `search()`](app/lib/search/postgres.server.ts#L269), index in [search_index.sql:110](prisma/sql/search_index.sql#L110) | Weighted `tsvector`: title and SKU rank highest, then vendor, type and tags, then description. `pg_trgm` catches typos. This goes beyond the substring match the test asks for |
+| Search without a page reload, debounced | [anotherdev-search.js:676](extensions/anotherdev-search/assets/anotherdev-search.js#L676) | 150 ms debounce ([helper at :95](extensions/anotherdev-search/assets/anotherdev-search.js#L95)) |
+| "No products found" state | [anotherdev-search.js:1455](extensions/anotherdev-search/assets/anotherdev-search.js#L1455) | Also offers a "did you mean" suggestion ([`suggestSpelling`](app/lib/search/postgres.server.ts#L726)) |
+| **Filters**: collection, vendor, colour, size, price, availability | [`buildFilterPredicates`](app/lib/search/postgres.server.ts#L105) | Merchants pick which filters appear in [app.filters.tsx](app/routes/app.filters.tsx). Colour and size come from Shopify variant options |
+| AND across filters, OR within a filter | [`buildFilterPredicates`](app/lib/search/postgres.server.ts#L105) | Black **or** Red, **and** size M |
+| **Dynamic filter counts** | [`computeFacets`](app/lib/search/postgres.server.ts#L583), `whereExcept()` at [:596](app/lib/search/postgres.server.ts#L596) | See [the facet counting rule](#the-facet-counting-rule) below |
+| Clear all and removable chips | [`renderChips`](extensions/anotherdev-search/assets/anotherdev-search.js#L1569) | |
+| **Sorting**: price ↑↓, name A→Z and Z→A | [`orderByClause`](app/lib/search/postgres.server.ts#L246) | Also relevance, newest and best-selling. Every sort ends in a stable tiebreaker, so results never reshuffle between pages |
+| **URL state**, shareable and safe to refresh | [`syncUrl`](extensions/anotherdev-search/assets/anotherdev-search.js#L1403), [`readState`](extensions/anotherdev-search/assets/anotherdev-search.js#L1368) | `pushState` on filter and sort changes, `replaceState` while typing |
+| Back and Forward | [popstate handler :1939](extensions/anotherdev-search/assets/anotherdev-search.js#L1939) | |
+| **Responsive** layout, mobile drawer | [`openDrawer`](extensions/anotherdev-search/assets/anotherdev-search.js#L1895) | Traps focus, and closes on Escape or a backdrop click. Merchants choose from four desktop layouts in Settings |
+| *Optional:* autocomplete | [`attachAutocomplete`](extensions/anotherdev-search/assets/anotherdev-search.js#L2003) → [`autocomplete()`](app/lib/search/postgres.server.ts#L760) | Suggests products, collections, pages and queries |
+| *Optional:* recent searches | [`recentSearches`](extensions/anotherdev-search/assets/anotherdev-search.js#L227) | Stored in `localStorage`, and each entry can be removed |
+| *Optional:* pagination | [`search()`](app/lib/search/postgres.server.ts#L269) | Page numbers with a stable order. Page depth is capped, so crawlers can't force full-table scans |
+
+### The facet counting rule
+
+A facet's counts come from the results filtered by **every other facet, but
+not by its own selection**:
+
+```
+counts(colour) = products matching the search + all active filters EXCEPT colour
+```
+
+If the colour facet counted only the current results, selecting Black would
+show `Black: 125` and `0` for every other colour, and the shopper couldn't
+widen their selection. `whereExcept(source)` in
+[`computeFacets`](app/lib/search/postgres.server.ts#L583) builds that WHERE
+clause for each facet. Availability needs one more step: its counts also ignore
+the store-wide "hide out of stock" setting. Otherwise "Out of stock" would
+always show zero.
+
+Counts are built from **the same predicates as the results**, so a count never
+disagrees with what the shopper sees after clicking it. The facets are computed
+in parallel and cached per filter signature
+([`facetSignature`](app/lib/search/postgres.server.ts#L1089)).
+
+### How a search request flows
+
+```
+Shopper types in the theme's search box
+  │  anotherdev-search.js: debounce 150 ms, read state from the URL
+  ▼
+GET /apps/anotherdev-search/search?q=…&filter.color=…     (Shopify App Proxy,
+  │                                                         same domain as the store)
+  ▼
+app/routes/proxy.search.tsx      verify the App Proxy signature, parse params
+  │  app/lib/proxy.server.ts     parseSearchParams()
+  ▼
+app/lib/search/index.server.ts   chooses the engine behind the SearchEngine interface
+  ▼
+app/lib/search/postgres.server.ts
+  │  normalise query → synonyms → redirects → tsvector + trigram match
+  │  → merchandising (pin / boost / bury) → sort → page
+  │  → computeFacets() with the exclude-own rule
+  ▼
+JSON → anotherdev-search.js renders the grid, facets and chips, then updates the URL
+```
+
+### Codebase tour: which file does what
+
+**Storefront (runs in the shopper's browser)**
+
+| File | Responsibility |
+|---|---|
+| [extensions/anotherdev-search/assets/anotherdev-search.js](extensions/anotherdev-search/assets/anotherdev-search.js) | The entire storefront UI: instant search dropdown, results page, facets, chips, sort, URL state, mobile drawer, add to cart, recent searches and voice search. Written in plain JS with no framework, to keep the theme fast |
+| [extensions/anotherdev-search/assets/anotherdev-search.css](extensions/anotherdev-search/assets/anotherdev-search.css) | Widget styles, driven by CSS variables set from the merchant's Settings |
+| [extensions/anotherdev-search/blocks/app-embed.liquid](extensions/anotherdev-search/blocks/app-embed.liquid) | The single toggle a merchant switches on in the theme editor. It loads the JS and passes in the config |
+| [extensions/anotherdev-search/blocks/](extensions/anotherdev-search/blocks/) | Optional blocks for merchants who want to place the search bar, results or recommendations by hand |
+| [extensions/anotherdev-pixel/src/index.js](extensions/anotherdev-pixel/src/index.js) | A Web Pixel that runs inside checkout and links completed orders back to the search that led to them |
+
+**Storefront API (App Proxy routes, called by the JS above)**
+
+| File | Responsibility |
+|---|---|
+| [app/routes/proxy.search.tsx](app/routes/proxy.search.tsx) | Main search and filter endpoint. Returns results, facets and counts |
+| [app/routes/proxy.autocomplete.tsx](app/routes/proxy.autocomplete.tsx) | Suggestions as the shopper types |
+| [app/routes/proxy.results.tsx](app/routes/proxy.results.tsx) | A server-rendered results page search engines can crawl (SEO) |
+| [app/routes/proxy.recommend.tsx](app/routes/proxy.recommend.tsx) | Related, trending and best-seller product rails |
+| [app/routes/proxy.track.tsx](app/routes/proxy.track.tsx) | Beacon that records clicks and add-to-carts |
+| [app/routes/proxy.config.tsx](app/routes/proxy.config.tsx) | Serves the shop's widget settings |
+| [app/routes/proxy.visual.tsx](app/routes/proxy.visual.tsx) | Search by photo, using image embeddings |
+| [app/routes/proxy.ai.tsx](app/routes/proxy.ai.tsx), [proxy.llms.tsx](app/routes/proxy.llms.tsx) | Product feed and llms.txt for AI shopping agents |
+| [app/lib/proxy.server.ts](app/lib/proxy.server.ts) | Shared helpers: parameter parsing, CORS, HTML escaping |
+
+**Search engine**
+
+| File | Responsibility |
+|---|---|
+| [app/lib/search/types.ts](app/lib/search/types.ts) | The `SearchEngine` interface. All other code depends on this, not on Postgres |
+| [app/lib/search/postgres.server.ts](app/lib/search/postgres.server.ts) | The engine: matching, ranking, filters, facet counts, sorting, merchandising, autocomplete and recommendations |
+| [app/lib/search/index.server.ts](app/lib/search/index.server.ts) | Picks the engine. Moving to Algolia or Meilisearch would mean adding one class |
+| [app/lib/search/normalize.ts](app/lib/search/normalize.ts) | Query cleanup: case, accents and escaping |
+| [app/lib/search/config.server.ts](app/lib/search/config.server.ts) | Loads each shop's synonyms, redirects and filter config, with caching |
+| [app/lib/search/embeddings.server.ts](app/lib/search/embeddings.server.ts) | Semantic search, using Voyage AI vectors stored in pgvector |
+| [app/lib/search/languages.ts](app/lib/search/languages.ts) | Stemming language, set per shop |
+| [prisma/sql/search_index.sql](prisma/sql/search_index.sql) | The `tsvector` column, GIN and trigram indexes, and Postgres extensions |
+
+**Catalog sync (Shopify → Postgres)**
+
+| File | Responsibility |
+|---|---|
+| [app/lib/sync/bulk.server.ts](app/lib/sync/bulk.server.ts) | Full sync through the **Bulk Operations API**: one async job, with the JSONL result streamed back and regrouped by `__parentId` |
+| [app/lib/sync/normalize-product.ts](app/lib/sync/normalize-product.ts) | Converts Shopify's product shape into the index shape. Options become colour and size, and variants give availability and the price range |
+| [app/lib/sync/upsert.server.ts](app/lib/sync/upsert.server.ts) | Batched writes into the index |
+| [app/lib/sync/collections.server.ts](app/lib/sync/collections.server.ts) | Collections, pages, and which products belong to each collection |
+| [app/routes/webhooks.products.upsert.tsx](app/routes/webhooks.products.upsert.tsx), [webhooks.products.delete.tsx](app/routes/webhooks.products.delete.tsx) | Incremental updates when a product changes |
+| [app/routes/cron.sync.tsx](app/routes/cron.sync.tsx) | A nightly reconcile, since Shopify doesn't guarantee webhook delivery |
+
+**Merchant admin (inside the Shopify admin)**
+
+| File | Responsibility |
+|---|---|
+| [app/routes/app._index.tsx](app/routes/app._index.tsx) | Dashboard: index health and search activity |
+| [app/routes/app.settings.tsx](app/routes/app.settings.tsx) | Four settings tabs, each with a live preview |
+| [app/routes/app.filters.tsx](app/routes/app.filters.tsx) | Choose, reorder and rename facets |
+| [app/routes/app.synonyms.tsx](app/routes/app.synonyms.tsx), [app.merchandising.tsx](app/routes/app.merchandising.tsx) | Synonyms, redirects, and pin, boost and bury rules |
+| [app/routes/app.analytics.tsx](app/routes/app.analytics.tsx) | Top searches, searches with no results, and conversions |
+| [app/routes/app.preview.tsx](app/routes/app.preview.tsx) | Relevance tester that explains why each result ranked where it did |
+| [app/routes/app.sync.tsx](app/routes/app.sync.tsx) | Starts a catalog sync and shows its progress |
+| [app/routes/app.plans.tsx](app/routes/app.plans.tsx), [app/lib/plans.ts](app/lib/plans.ts), [app/lib/billing.server.ts](app/lib/billing.server.ts) | Plans and Shopify billing |
+| [app/lib/settings.ts](app/lib/settings.ts) | Every widget setting, with defaults and validation |
+| [app/lib/analytics.server.ts](app/lib/analytics.server.ts) | Analytics aggregation, CSV generation and data retention |
+| [app/routes/app.export.$kind.tsx](app/routes/app.export.$kind.tsx) | CSV downloads, as a resource route — analytics, search activity, synonyms, redirects |
+
+**Data and tests**
+
+| File | Responsibility |
+|---|---|
+| [prisma/schema.prisma](prisma/schema.prisma) | Tables: `Shop`, `Product`, `ProductVariant`, `Collection`, `Synonym`, `Redirect`, `MerchandisingRule`, `FilterConfig`, `SearchEvent`, `SyncState` |
+| [test/](test/) | Unit tests, plus integration and edge-case suites that run against real Postgres in CI |
+
+### At 150,000 products
+
+The test's last question asks what changes at scale. This app is already built
+for it:
+
+- **Initial index.** The Bulk Operations API runs one async job, where
+  paginated GraphQL would take about 1,500 calls against the rate limit. The
+  JSONL comes back flat, and each child row is regrouped onto its parent by
+  `__parentId` ([bulk.server.ts](app/lib/sync/bulk.server.ts)).
+- **Keeping the index fresh.** Product and collection webhooks apply changes as
+  they happen. A nightly reconcile catches anything a dropped webhook missed.
+- **Engine.** Postgres `tsvector`, `pg_trgm` and GIN indexes keep a single
+  source of truth, with no second datastore to fall out of sync. When query
+  volume or catalog size calls for it, the `SearchEngine` interface lets the
+  read path move to Elasticsearch or Algolia without touching any routes or UI.
+- **Facet counts.** Each count is a grouped query that shares the results'
+  WHERE clause, cached per filter signature. Beyond a few hundred thousand
+  products, the next step would be pre-computed counts for unfiltered
+  collection pages, where most traffic lands.
+- **Storefront speed.** A theme app extension instead of script tags, and an
+  App Proxy that keeps requests on the store's own domain. No render-blocking
+  JS, and skeleton loading avoids layout shift.
+
+Filtering a static JSON file in memory, as the test describes, is the right
+call at 1,000 products. At 150,000 it isn't, which is why this app indexes in
+Postgres.
+
+### Libraries and AI tools used
+
+- **Framework:** React Router 7, `@shopify/shopify-app-react-router`, Polaris web
+  components, App Bridge
+- **Data:** Prisma, PostgreSQL (Supabase) with `pg_trgm`, `unaccent`,
+  `fuzzystrmatch` and `pgvector`
+- **Embeddings:** Voyage AI, for the optional semantic and photo search
+- **Hosting:** Railway
+- **AI tools:** Claude (Anthropic), through Claude Code, for code generation,
+  review and documentation. I set the architecture, and reviewed and tested
+  the output.
+
+---
+
 ## How it works
 
 ```

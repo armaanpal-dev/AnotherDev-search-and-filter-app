@@ -9,13 +9,15 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import prisma from "./db.server";
 
 // Plan names as Shopify knows them. Free needs no subscription, so it is not
-// listed here. These strings are what appear on the merchant invoice and in
-// billing.check(), so renaming one orphans existing subscriptions.
-// Entitlements live in app/lib/billing.server.ts; this file only sets price.
-// These strings must match the Display name of the matching plan in the
-// Developer Dashboard exactly: managed pricing names a subscription after the
-// display name, and billing.check() matches on that name. A mismatch reads a
-// paying merchant as Free.
+// listed here.
+//
+// These strings must match each plan's Display name in the Partner Dashboard
+// EXACTLY. This app uses Shopify App Pricing, which names a subscription after
+// the display name, and billing.check() matches on that name — so a mismatch
+// reads a paying merchant as Free.
+//
+// Entitlements live in app/lib/plans.ts; this file only mirrors what Shopify
+// charges.
 export const GROWTH_PLAN = "Growth";
 export const PRO_PLAN = "Pro";
 export const CUSTOM_PLAN = "Custom";
@@ -29,6 +31,19 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
+  // Read-only billing configuration.
+  //
+  // Shopify App Pricing owns the plans, prices and trials — they are set in the
+  // Partner Dashboard, and Shopify creates the subscription when the merchant
+  // approves it on its hosted plan page. Nothing here creates a charge, and
+  // nothing in this app may call billing.request(): for an app on App Pricing
+  // that call fails, which is how an upgrade button ends up doing nothing.
+  // See planSelectionUrl() in app/lib/billing.server.ts.
+  //
+  // This block stays only because billing.check() — which is how the app reads
+  // the shop's current tier — refuses to run without a billing config. Only the
+  // plan NAMES are used; the amounts below must be kept in step with the
+  // dashboard so this file doesn't mislead the next reader.
   billing: {
     [GROWTH_PLAN]: {
       lineItems: [

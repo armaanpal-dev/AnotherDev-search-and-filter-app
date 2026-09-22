@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "re
 import { useLoaderData, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getPlanStatus, isTestBilling, BILLING_PLAN_BY_KEY } from "../lib/billing.server";
+import { getPlanStatus, planSelectionUrl } from "../lib/billing.server";
 import { PLAN_LIMITS, PLAN_ORDER, isPlanKey, type PlanKey } from "../lib/plans";
 import { semanticReady } from "../lib/search/embeddings.server";
 import prisma from "../db.server";
@@ -17,9 +17,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const status = await getPlanStatus(billing, shop?.planOverride);
   const productCount = shop ? await prisma.product.count({ where: { shopId: shop.id } }) : 0;
 
-  // Shopify sends the merchant back here after the charge-approval screen. If
-  // they return without an active payment they declined it (or it is still
-  // pending) — say so, rather than silently rendering the same page again.
+  // Shown when the merchant comes back from the charge-approval screen without
+  // an active payment, which means they declined it (or it is still pending).
+  // It relies on each plan's Welcome link in the Partner Dashboard pointing at
+  // /app/plans?billing=return; without that the merchant simply lands back on
+  // the app home, which is harmless — this banner just never appears.
   const returned = new URL(request.url).searchParams.get("billing") === "return";
 
   // Only advertise semantic search when this deployment can actually run it:
@@ -34,28 +36,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     productCount,
     declined: returned && !status.isPaid,
     semantic,
+    // Every plan change — up or down — happens on Shopify's hosted plan page,
+    // the only supported way to charge under Shopify App Pricing. See
+    // planSelectionUrl() for why creating the charge here instead cannot work.
+    planPageUrl: planSelectionUrl(session.shop),
   };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
-  const isTest = isTestBilling();
-
-  if (intent === "subscribe") {
-    const target = String(form.get("plan") ?? "");
-    const billingPlan = isPlanKey(target) ? BILLING_PLAN_BY_KEY[target] : undefined;
-    if (!billingPlan) return { error: "Unknown plan." };
-    // Redirects the merchant to Shopify's managed charge-approval screen. The
-    // `billing=return` marker lets the loader tell "came back from approval and
-    // still has no charge" (declined) apart from a plain visit to this page.
-    await billing.request({
-      plan: billingPlan as never,
-      isTest,
-      returnUrl: `https://admin.shopify.com/store/${session.shop.replace(".myshopify.com", "")}/apps/${process.env.SHOPIFY_API_KEY}/app/plans?billing=return`,
-    });
-  }
 
   if (intent === "override") {
     // Checked here as well as in the loader: hiding a control is not a
@@ -86,17 +77,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     invalidateShopConfig(shop.id);
     return { overrideSet: raw };
-  }
-
-  if (intent === "cancel") {
-    const { appSubscriptions } = (await billing.check({
-      plans: Object.values(BILLING_PLAN_BY_KEY) as never,
-      isTest,
-    })) as { appSubscriptions?: { id: string }[] };
-    for (const sub of appSubscriptions ?? []) {
-      await billing.cancel({ subscriptionId: sub.id, isTest, prorate: true });
-    }
-    return { cancelled: true };
   }
 
   return null;
@@ -131,8 +111,18 @@ const FEATURES: { label: string; on: (k: PlanKey) => boolean | string }[] = [
 // Order comes from the plan table so a new tier appears here automatically.
 
 export default function PlansPage() {
-  const { plan, overridden, productCount, declined, semantic, isOperator, currentOverride } =
-    useLoaderData<typeof loader>();
+  const {
+    plan,
+    overridden,
+    productCount,
+    declined,
+    semantic,
+    isOperator,
+    currentOverride,
+    planPageUrl,
+  } = useLoaderData<typeof loader>();
+  // Only the operator override posts back to this route now; plan changes are
+  // links to Shopify's own page.
   const fetcher = useFetcher();
   useSaveToast(fetcher, "Plan updated");
   const busy = fetcher.state !== "idle";
@@ -219,29 +209,25 @@ export default function PlansPage() {
                     <s-button variant="secondary" disabled>
                       Current plan
                     </s-button>
-                  ) : key === "free" ? (
-                    <fetcher.Form method="post">
-                      <input type="hidden" name="intent" value="cancel" />
-                      <s-button
-                        type="submit"
-                        variant="secondary"
-                        {...(busy ? { loading: true } : {})}
-                      >
-                        Downgrade to Free
-                      </s-button>
-                    </fetcher.Form>
                   ) : (
-                    <fetcher.Form method="post">
-                      <input type="hidden" name="intent" value="subscribe" />
-                      <input type="hidden" name="plan" value={key} />
-                      <s-button
-                        type="submit"
-                        variant="primary"
-                        {...(busy ? { loading: true } : {})}
-                      >
-                        {plan === "free" ? "Start 14-day trial" : `Switch to ${p.name}`}
-                      </s-button>
-                    </fetcher.Form>
+                    /* A plain link, opened at the top level, rather than a form
+                       that posts back here first.
+                       Shopify's plan page lives outside this app's iframe, so
+                       the browser refuses to navigate to it from inside the
+                       frame — target="_top" is what makes the click land. Going
+                       straight there also means no server round-trip that can
+                       fail without the merchant seeing anything, which is how
+                       the old billing.request() button ended up doing nothing.
+                       Trial length is deliberately not named on the button: it
+                       is set per plan in the Partner Dashboard, and a number
+                       hard-coded here becomes a promise the app cannot keep. */
+                    <s-button
+                      href={planPageUrl}
+                      target="_top"
+                      variant={key === "free" ? "secondary" : "primary"}
+                    >
+                      {key === "free" ? "Downgrade to Free" : `Choose ${p.name}`}
+                    </s-button>
                   )}
 
                   <s-stack direction="block" gap="small-300">
@@ -324,10 +310,11 @@ export default function PlansPage() {
       <s-section slot="aside" heading="Billing">
         <s-paragraph>
           <s-text color="subdued">
-            Charges are handled by Shopify and appear on your normal Shopify
-            invoice. Every paid plan starts with a 14-day trial. Cancelling is
-            immediate and prorated, and your index stays in place, capped back to
-            the Free limit.
+            Choosing a plan takes you to Shopify&rsquo;s plan page, where you
+            approve or decline the charge. Prices, free trials and billing
+            frequency are shown there, and charges appear on your normal Shopify
+            invoice. Downgrading keeps your index in place, capped back to the
+            Free limit.
           </s-text>
         </s-paragraph>
       </s-section>

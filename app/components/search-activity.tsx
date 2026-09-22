@@ -11,6 +11,7 @@
 // chrome, and their width is computed per row. Polaris has no primitive for it.
 
 import type { ReactNode } from "react";
+import { ExportCsvButton } from "./ui";
 
 export type ActivityRange = "day" | "week" | "month";
 
@@ -124,14 +125,13 @@ function Column({
         </s-box>
       )}
 
-      {/* Same shape as the Analytics page's export, which is proven to work
-          inside the embedded iframe: a plain link with `download`, pointing at
-          the loader with an ?export= param. No icon name is passed, because an
-          icon that does not exist renders as nothing and there is no way to
-          verify the name from here. */}
-      <s-button variant="secondary" href={exportHref} download={exportName}>
+      {/* Fetched and downloaded, not linked to. A link to the loader looks
+          simpler and is what both exports used to do, but a `text/csv` body
+          reaching the router inside the embedded iframe is an error, not a
+          download — see ExportCsvButton. */}
+      <ExportCsvButton href={exportHref} filename={exportName}>
         Export
-      </s-button>
+      </ExportCsvButton>
     </s-stack>
   );
 }
