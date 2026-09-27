@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { DEFAULT_FILTERS } from "./search/config.server";
+import { DEFAULT_FILTERS, invalidateShopConfig } from "./search/config.server";
 
 /** Look up our internal Shop row by myshopify domain. */
 export async function getShopByDomain(domain: string) {
@@ -45,8 +45,26 @@ export async function ensureShop(domain: string) {
 }
 
 export async function markUninstalled(domain: string) {
+  const shop = await prisma.shop.findUnique({ where: { domain }, select: { id: true } });
   await prisma.shop.updateMany({
     where: { domain },
-    data: { uninstalledAt: new Date() },
+    data: {
+      uninstalledAt: new Date(),
+      // Drop the entitlement with the install.
+      //
+      // Shopify cancels the subscription when an app is uninstalled, so a
+      // reinstall starts unpaid until the merchant approves a charge again.
+      // `planName` is what the storefront (App Proxy) gates Pro features on,
+      // because it has no billing context to ask — so leaving it at "pro" meant
+      // a reinstalled shop kept serving semantic search and the AI feed, for
+      // free, until someone happened to open the admin and trigger a re-read.
+      //
+      // planOverride is deliberately untouched: it is set by an operator, not
+      // bought, and it is how support grants a tier with no charge.
+      planName: "free",
+    },
   });
+  // The storefront reads this through a 30-second cache, so drop it rather than
+  // serving paid features for one more window after the app is gone.
+  if (shop) invalidateShopConfig(shop.id);
 }
