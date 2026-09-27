@@ -5,7 +5,7 @@
 // no raw elements and no inline styles, which is what previously produced
 // one-off spacing hacks like `style={{ marginInlineStart: "auto" }}`.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 /** Responsive column templates. Tiles wrap on their own, without media queries. */
@@ -203,83 +203,4 @@ export function useSaveToast(
       bridge.toast.show(message);
     }
   }, [fetcher.state, fetcher.data, message]);
-}
-
-/**
- * A button that downloads a CSV the server generates.
- *
- * NOT a link. A plain `<s-button href="?export=csv">` looks like it should
- * work, and it is how this app shipped, but it fails two different ways inside
- * the Shopify admin:
- *
- *  - the app is embedded in an iframe, and following that link client-side
- *    hands a `text/csv` body to the router, which expects route data and errors
- *    out (this is the "clicking export CSV triggers an error" in App Store
- *    review 2.1.1);
- *  - a query-only href also drops `shop`, `host`, `embedded` and `id_token`
- *    from the URL, so a full navigation arrives unauthenticated.
- *
- * Fetching instead keeps the page where it is. App Bridge attaches the session
- * token to same-origin requests, so the loader authenticates normally, and the
- * response is turned into a download here — the pattern Shopify's own export
- * examples use.
- */
-export function ExportCsvButton({
-  href,
-  filename,
-  children = "Export CSV",
-  slot,
-}: {
-  /** Route URL that returns `text/csv`, e.g. `/app/analytics?export=csv&days=30`. */
-  href: string;
-  filename: string;
-  children?: ReactNode;
-  /** Lowercase to satisfy the Polaris slot type, e.g. "primary-action". */
-  slot?: Lowercase<string>;
-}) {
-  const [busy, setBusy] = useState(false);
-
-  const toast = (message: string, isError = false) => {
-    const bridge = (globalThis as { shopify?: { toast?: { show: (m: string, o?: object) => void } } })
-      .shopify;
-    bridge?.toast?.show(message, isError ? { isError: true, duration: 5000 } : undefined);
-  };
-
-  const download = async () => {
-    if (busy) return;
-    setBusy(true);
-    let objectUrl: string | null = null;
-    try {
-      const res = await fetch(href, { headers: { Accept: "text/csv" } });
-      if (!res.ok) throw new Error(`Export failed (${res.status})`);
-      const blob = await res.blob();
-      objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } catch (error) {
-      // Never fail silently: a download that does nothing is indistinguishable
-      // from a broken button.
-      toast(error instanceof Error ? error.message : "Export failed", true);
-    } finally {
-      // Revoked on the next tick so the click has taken the URL first.
-      const created = objectUrl;
-      if (created) setTimeout(() => URL.revokeObjectURL(created), 10_000);
-      setBusy(false);
-    }
-  };
-
-  return (
-    <s-button
-      {...(slot ? { slot } : {})}
-      variant="secondary"
-      onClick={download}
-      {...(busy ? { loading: true } : {})}
-    >
-      {children}
-    </s-button>
-  );
 }

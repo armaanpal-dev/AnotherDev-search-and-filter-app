@@ -6,7 +6,7 @@ import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { getAnalytics } from "../lib/analytics.server";
 import { getPixelState } from "../lib/pixel.server";
-import { Stat, Row, Bar, Empty, Card, ExportCsvButton, TILES, WIDE } from "../components/ui";
+import { Stat, Row, Bar, Empty, Card, TILES, WIDE } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing, admin } = await authenticate.admin(request);
@@ -54,12 +54,6 @@ export default function AnalyticsPage() {
 
   return (
     <s-page heading="Search analytics">
-      <ExportCsvButton
-        slot="primary-action"
-        href={`/app/export/analytics?days=${d.windowDays}`}
-        filename={`search-analytics-${d.windowDays}d.csv`}
-      />
-
       <s-section heading={`Last ${d.windowDays} days`}>
         {/* Range picker. The window was previously fixed to the plan's maximum,
             so a merchant checking whether yesterday's change helped had to read

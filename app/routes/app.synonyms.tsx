@@ -7,16 +7,7 @@ import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { suggestSynonyms } from "../lib/analytics.server";
-import {
-  Stat,
-  Card,
-  Row,
-  Empty,
-  ExportCsvButton,
-  TILES,
-  CARDS,
-  useSaveToast,
-} from "../components/ui";
+import { Stat, Card, Row, Empty, TILES, CARDS, useSaveToast } from "../components/ui";
 
 /** A shop cannot have unlimited rules: every one is another OR group in the
  *  tsquery, and config.server only loads the first 2000 anyway. */
@@ -101,81 +92,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         data: { shopId: shop.id, type: "multiway", input: null, terms: [term, suggestion] },
       });
     }
-  } else if (intent === "import") {
-    // CSV import: `type,input,terms` with terms pipe-separated, which is the
-    // shape the export produces — so a round trip is lossless.
-    const text = String(form.get("csv") || "");
-    if (!text.trim()) return { error: "Paste some CSV first." };
-
-    const existing = await prisma.synonym.count({ where: { shopId: shop.id } });
-    let room = MAX_SYNONYMS - existing;
-    const rows: { type: string; input: string | null; terms: string[] }[] = [];
-    let skipped = 0;
-
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.trim() || room <= 0) continue;
-      const cells = parseCsvLine(line);
-      // Tolerate the exported header rather than importing it as a rule.
-      if (cells[0]?.toLowerCase() === "type") continue;
-      const type = cells[0]?.trim().toLowerCase() === "oneway" ? "oneway" : "multiway";
-      const input = type === "oneway" ? (cells[1] ?? "").trim().slice(0, 80) : null;
-      // Accept either the pipe-separated export shape or plain extra columns,
-      // because a merchant's own spreadsheet will not match ours.
-      const termSource = (cells[2] ?? "").includes("|")
-        ? (cells[2] ?? "").split("|")
-        : cells.slice(2);
-      const terms = [
-        ...new Set(termSource.map((t) => t.trim()).filter(Boolean).map((t) => t.slice(0, 80))),
-      ].slice(0, 50);
-
-      if (type === "oneway" ? !input || !terms.length : terms.length < 2) {
-        skipped++;
-        continue;
-      }
-      rows.push({ type, input, terms });
-      room--;
-    }
-
-    if (!rows.length) {
-      return { error: `Nothing importable found${skipped ? ` (${skipped} rows skipped)` : ""}.` };
-    }
-    await prisma.synonym.createMany({
-      data: rows.map((r) => ({ shopId: shop.id, ...r })),
-    });
-    invalidateShopConfig(shop.id);
-    return { ok: true, imported: rows.length, skipped };
   }
 
   invalidateShopConfig(shop.id);
   return { ok: true };
 };
-
-/** Minimal RFC-4180 line parser: quoted cells, doubled quotes inside them. */
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (quoted) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; }
-        else quoted = false;
-      } else cur += ch;
-    } else if (ch === '"') {
-      quoted = true;
-    } else if (ch === ",") {
-      out.push(cur);
-      cur = "";
-    } else {
-      cur += ch;
-    }
-  }
-  out.push(cur);
-  // The export prefixes a leading =+-@ to defuse spreadsheet formulas; strip it
-  // back off so a round trip returns the original term.
-  return out.map((c) => c.replace(/^'(?=[=+\-@])/, ""));
-}
 
 export default function SynonymsPage() {
   const { synonyms, suggestions } = useLoaderData<typeof loader>();
@@ -186,27 +107,10 @@ export default function SynonymsPage() {
   const multi = synonyms.filter((s) => s.type !== "oneway").length;
   const data = fetcher.data;
   const error = data && "error" in data ? data.error : null;
-  const imported = data && "imported" in data ? data.imported : null;
 
   return (
     <s-page heading="Synonyms">
-      <ExportCsvButton
-        slot="primary-action"
-        href="/app/export/synonyms"
-        filename="synonyms.csv"
-      />
-
       {error && <s-banner tone="critical">{error}</s-banner>}
-      {imported ? (
-        <s-banner tone="success" heading={`Imported ${imported} groups`} dismissible>
-          <s-paragraph>
-            {data && "skipped" in data && data.skipped
-              ? `${data.skipped} rows were skipped because they had too few terms.`
-              : "Your storefront picks them up within about 30 seconds."}
-          </s-paragraph>
-        </s-banner>
-      ) : null}
-
       <s-section heading="Overview">
         <s-grid gridTemplateColumns={TILES} gap="large-100">
           <Stat label="Groups" value={String(synonyms.length)} />
@@ -356,24 +260,6 @@ export default function SynonymsPage() {
             Start with the terms that returned nothing. Analytics lists them.
           </Empty>
         )}
-      </s-section>
-
-      <s-section heading="Import from a spreadsheet">
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value="import" />
-          <s-stack direction="block" gap="base">
-            <s-text-area
-              name="csv"
-              label="Paste CSV"
-              rows={6}
-              placeholder={
-                "type,input,terms\nmultiway,,sneaker|trainer|running shoe\noneway,jumper,sweater|pullover"
-              }
-              details="One group per line. Same shape as the export, so a round trip is lossless."
-            />
-            <s-button variant="secondary" type="submit">Import</s-button>
-          </s-stack>
-        </fetcher.Form>
       </s-section>
 
       <s-section slot="aside" heading="Where to start">

@@ -11,7 +11,6 @@
 // chrome, and their width is computed per row. Polaris has no primitive for it.
 
 import type { ReactNode } from "react";
-import { ExportCsvButton } from "./ui";
 
 export type ActivityRange = "day" | "week" | "month";
 
@@ -36,20 +35,16 @@ export interface TermRow {
   count: number;
 }
 
-/** One ranked column: heading, scrollable rows, export link. */
+/** One ranked column: heading and scrollable rows. */
 function Column({
   heading,
   rows,
   tone,
-  exportHref,
-  exportName,
   empty,
 }: {
   heading: string;
   rows: TermRow[];
   tone: "positive" | "neutral";
-  exportHref: string;
-  exportName: string;
   empty: string;
 }) {
   // Bars are relative to the top row, not to the total: the question a merchant
@@ -124,14 +119,6 @@ function Column({
           <s-text color="subdued">{empty}</s-text>
         </s-box>
       )}
-
-      {/* Fetched and downloaded, not linked to. A link to the loader looks
-          simpler and is what both exports used to do, but a `text/csv` body
-          reaching the router inside the embedded iframe is an error, not a
-          download — see ExportCsvButton. */}
-      <ExportCsvButton href={exportHref} filename={exportName}>
-        Export
-      </ExportCsvButton>
     </s-stack>
   );
 }
@@ -142,7 +129,6 @@ export function SearchActivity({
   zero,
   maxDays,
   rangeHref,
-  exportHref,
 }: {
   range: ActivityRange;
   top: TermRow[];
@@ -151,8 +137,6 @@ export function SearchActivity({
   maxDays: number;
   /** Where a range tab points. */
   rangeHref: (r: ActivityRange) => string;
-  /** Where an Export button points, per list. */
-  exportHref: (list: "top" | "zero") => string;
 }) {
   // Free is sold 7 days of history. Offering a Month tab to every plan would
   // hand out the paid window for nothing, which is the bug the Analytics page
@@ -184,16 +168,12 @@ export function SearchActivity({
             heading="Top searches"
             rows={top}
             tone="positive"
-            exportHref={exportHref("top")}
-            exportName={`top-searches-${range}.csv`}
             empty="No searches recorded in this period yet."
           />
           <Column
             heading="Top searches with no results"
             rows={zero}
             tone="neutral"
-            exportHref={exportHref("zero")}
-            exportName={`no-results-${range}.csv`}
             empty="Nothing came up empty in this period."
           />
         </s-grid>

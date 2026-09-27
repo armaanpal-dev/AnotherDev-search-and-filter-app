@@ -7,7 +7,7 @@ import prisma from "../db.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
-import { Row, Empty, Card, ExportCsvButton, useSaveToast } from "../components/ui";
+import { Row, Empty, useSaveToast } from "../components/ui";
 
 const ids = (v: FormDataEntryValue | null) =>
   String(v || "")
@@ -160,63 +160,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   } else if (intent === "deleteRedirect") {
     await prisma.redirect.deleteMany({ where: { id: String(form.get("id")), shopId: shop.id } });
-  } else if (intent === "importRedirects") {
-    const text = String(form.get("csv") || "");
-    if (!text.trim()) return { error: "Paste some CSV first." };
-    let imported = 0;
-    let skipped = 0;
-    for (const line of text.split(/\r?\n/).slice(0, 2000)) {
-      if (!line.trim()) continue;
-      const cells = parseCsvLine(line);
-      if (cells[0]?.toLowerCase() === "query") continue;
-      const query = (cells[0] ?? "").trim().toLowerCase().slice(0, 200);
-      const url = (cells[1] ?? "").trim().slice(0, 500);
-      // Same same-origin rule as the single-add form. An import must not be a
-      // way around a validation the form enforces.
-      if (!query || !url.startsWith("/") || url.startsWith("//")) {
-        skipped++;
-        continue;
-      }
-      await prisma.redirect.upsert({
-        where: { shopId_query: { shopId: shop.id, query } },
-        create: { shopId: shop.id, query, url },
-        update: { url, active: true },
-      });
-      imported++;
-    }
-    invalidateShopConfig(shop.id);
-    return imported
-      ? { ok: true, imported, skipped }
-      : { error: `Nothing importable found${skipped ? ` (${skipped} rows skipped)` : ""}.` };
   }
+
   invalidateShopConfig(shop.id);
   return { ok: true };
 };
-
-/** Minimal RFC-4180 line parser, matching the export's escaping. */
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (quoted) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; }
-        else quoted = false;
-      } else cur += ch;
-    } else if (ch === '"') {
-      quoted = true;
-    } else if (ch === ",") {
-      out.push(cur);
-      cur = "";
-    } else {
-      cur += ch;
-    }
-  }
-  out.push(cur);
-  return out.map((c) => c.replace(/^'(?=[=+\-@])/, ""));
-}
 
 /** Condition rows arrive as parallel arrays (cond.field[], cond.op[], …). */
 function parseConditionsForm(form: FormData) {
@@ -252,7 +200,6 @@ export default function MerchandisingPage() {
   const [editing, setEditing] = useState<string | null>(null);
   const data = fetcher.data;
   const error = data && "error" in data ? data.error : null;
-  const imported = data && "imported" in data ? data.imported : null;
 
   if (!isPro) {
     return (
@@ -280,10 +227,6 @@ export default function MerchandisingPage() {
   return (
     <s-page heading="Merchandising">
       {error && <s-banner tone="critical">{error}</s-banner>}
-      {imported ? (
-        <s-banner tone="success" heading={`Imported ${imported} redirects`} dismissible />
-      ) : null}
-
       {experimentRunning && (
         <s-banner tone="info" heading="An A/B test is running">
           <s-paragraph>
@@ -414,35 +357,6 @@ export default function MerchandisingPage() {
           </s-stack>
         ) : null}
 
-        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(260px, 1fr))" gap="large-100">
-          <Card title="Bulk import">
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="importRedirects" />
-              <s-stack direction="block" gap="small-300">
-                <s-text-area
-                  name="csv"
-                  label="Paste CSV"
-                  rows={5}
-                  placeholder={"query,url\nshipping,/policies/shipping-policy\nsale,/collections/sale"}
-                  details="Targets must be a path on your store."
-                />
-                <s-button variant="secondary" type="submit">Import</s-button>
-              </s-stack>
-            </fetcher.Form>
-          </Card>
-          <Card title="Export">
-            <s-text color="subdued">
-              Take your redirects with you, or edit them in a spreadsheet and paste
-              them back.
-            </s-text>
-            <ExportCsvButton
-              href="/app/export/redirects"
-              filename="redirects.csv"
-            >
-              Download CSV
-            </ExportCsvButton>
-          </Card>
-        </s-grid>
       </s-section>
 
       <s-section slot="aside" heading="Check your work">

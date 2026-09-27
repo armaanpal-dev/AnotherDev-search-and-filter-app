@@ -156,8 +156,7 @@ JSON → anotherdev-search.js renders the grid, facets and chips, then updates t
 | [app/routes/app.sync.tsx](app/routes/app.sync.tsx) | Starts a catalog sync and shows its progress |
 | [app/routes/app.plans.tsx](app/routes/app.plans.tsx), [app/lib/plans.ts](app/lib/plans.ts), [app/lib/billing.server.ts](app/lib/billing.server.ts) | Plans and Shopify billing |
 | [app/lib/settings.ts](app/lib/settings.ts) | Every widget setting, with defaults and validation |
-| [app/lib/analytics.server.ts](app/lib/analytics.server.ts) | Analytics aggregation, CSV generation and data retention |
-| [app/routes/app.export.$kind.tsx](app/routes/app.export.$kind.tsx) | CSV downloads, as a resource route — analytics, search activity, synonyms, redirects |
+| [app/lib/analytics.server.ts](app/lib/analytics.server.ts) | Analytics aggregation and data retention |
 
 **Data and tests**
 

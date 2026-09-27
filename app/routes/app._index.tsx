@@ -208,7 +208,6 @@ export default function Dashboard() {
         zero={d.zeroTerms}
         maxDays={d.maxDays}
         rangeHref={(r) => `?range=${r}`}
-        exportHref={(list) => `/app/export/activity?range=${d.range}&list=${list}`}
       />
 
       {!d.synced && (

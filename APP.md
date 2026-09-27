@@ -163,7 +163,7 @@ updates arrive by webhook; `cron.sync` reconciles on a schedule.
 | `app._index` | Dashboard — storefront mode, 7-day metrics, setup steps, links |
 | `app.sync` | Index: run and monitor the catalog sync, auto-sync toggle |
 | `app.filters` | **Facet configuration** — which filters exist, their order, display type, and quick-filter chips |
-| `app.synonyms` | Synonym groups (multiway and one-way), CSV import |
+| `app.synonyms` | Synonym groups (multiway and one-way) |
 | `app.merchandising` | Pin/boost/bury/hide rules, search redirects, A/B variants |
 | `app.analytics` | Top searches, zero-result terms, CTR, add-to-cart, revenue |
 | `app.plans` | Plan comparison, upgrade, cancel, operator plan override |
@@ -562,6 +562,14 @@ for the store. Full detail in [PRIVACY.md](PRIVACY.md).
 
 ## 16. Known gaps
 
+- **CSV import and export are deliberately absent**, removed before the first
+  App Store submission and to be added back afterwards. When they return, they
+  belong in a **resource route** (a route file with no default export), fetched
+  from the page and turned into a download via a Blob. A link to a UI route's
+  loader looks simpler and does not work: inside the embedded admin the router
+  receives a `text/csv` body where it expects route data, and the merchant sees
+  an error instead of a file. `csvCell`, `analyticsToCsv` and `termsToCsv` are
+  still in `analytics.server.ts`, tested, ready for that.
 - `DEPLOY.md` documents Fly.io; the app runs on Railway.
 - `parseBulkJsonl` has no unit test — it lives in a Prisma-importing module and
   would need extracting first.
