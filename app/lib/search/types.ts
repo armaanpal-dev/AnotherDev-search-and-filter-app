@@ -101,6 +101,8 @@ export interface SearchResult {
   // Merchant-defined one-click filter shortcuts, so the storefront can render
   // them without a second request.
   presets?: { label: string; params: string }[];
+  // Merchant promotional banners for this search term ("top" or in the grid).
+  banners?: import("./features").Banner[];
   // Debug/telemetry: which strategy produced the hits.
   strategy: "fulltext" | "fuzzy" | "hybrid" | "browse" | "sku" | "semantic";
   tookMs: number;

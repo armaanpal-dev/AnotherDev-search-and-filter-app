@@ -133,6 +133,20 @@ export interface WidgetSettings {
   gridColumnsMobile: number;    // cards per row below 750px
   showVendor: boolean;
   quickAdd: boolean;            // add-to-cart straight from the results grid
+  /**
+   * What the button on a result card does.
+   *   quick_add   add the product straight to the cart (single-variant products)
+   *   quick_view  open a Quick View: variant picker, quantity, add to cart
+   *   none        no button; the card links to the product
+   * Shops saved before this existed derive it from `quickAdd`, so nothing
+   * changes for them until the merchant picks something. `quickAdd` is kept in
+   * step with it for the storefront code that still reads it.
+   */
+  cardAction: "quick_add" | "quick_view" | "none";
+  /** Products shown first when the search box is focused but empty (Shopify ids). */
+  emptySearchProductIds: string[];
+  /** Show prices/availability for the shopper's country (Shopify Markets). */
+  marketPricing: boolean;
   // Appearance
   accentColor: string;
   backgroundColor: string;
@@ -203,6 +217,9 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   gridColumnsMobile: 2,
   showVendor: false,
   quickAdd: false,
+  cardAction: "none",
+  emptySearchProductIds: [],
+  marketPricing: false,
   accentColor: "#111111",
   backgroundColor: "#ffffff",
   textColor: "#1a1a1a",
@@ -277,7 +294,9 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     gridColumns: num(s.gridColumns, DEFAULT_SETTINGS.gridColumns, 2, 5),
     gridColumnsMobile: num(s.gridColumnsMobile, DEFAULT_SETTINGS.gridColumnsMobile, 1, 4),
     showVendor: bool(s.showVendor, DEFAULT_SETTINGS.showVendor),
-    quickAdd: bool(s.quickAdd, DEFAULT_SETTINGS.quickAdd),
+    ...cardActionFields(s),
+    emptySearchProductIds: idList(s.emptySearchProductIds, 24),
+    marketPricing: bool(s.marketPricing, DEFAULT_SETTINGS.marketPricing),
     accentColor: color(s.accentColor, DEFAULT_SETTINGS.accentColor),
     backgroundColor: color(s.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
     textColor: color(s.textColor, DEFAULT_SETTINGS.textColor),
@@ -306,6 +325,18 @@ export function mergeSettings(
     if (value !== undefined && value !== null) defined[key] = value;
   }
   return resolveSettings({ ...current, ...defined });
+}
+
+function cardActionFields(s: Partial<WidgetSettings>) {
+  const legacy = bool(s.quickAdd, DEFAULT_SETTINGS.quickAdd) ? "quick_add" : "none";
+  const cardAction = oneOf(s.cardAction, ["quick_add", "quick_view", "none"], legacy);
+  return { cardAction, quickAdd: cardAction === "quick_add" };
+}
+
+/** Numeric Shopify ids only, de-duplicated and bounded. */
+function idList(v: unknown, max: number): string[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((x) => String(x).trim()).filter((x) => /^\d{1,20}$/.test(x)))].slice(0, max);
 }
 
 export const WEIGHTS = ["300", "400", "500", "600", "700"] as const;

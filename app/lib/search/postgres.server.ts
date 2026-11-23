@@ -1,6 +1,27 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
-import { getShopConfig, facetCache, type MerchCondition, type MerchRule } from "./config.server";
+import {
+  getShopConfig,
+  facetCache,
+  DEFAULT_FILTERS,
+  type MerchCondition,
+  type MerchRule,
+} from "./config.server";
+import {
+  expandMergedSelection,
+  facetSourcesFor,
+  isSizeSource,
+  isSuggestionBlocked,
+  mergeFacetValues,
+  sortSizeValues,
+} from "./features";
+
+/** "option:Color" -> "Color", "metafield:material" -> "Material". */
+function labelForSource(source: string): string {
+  const raw = source.includes(":") ? source.slice(source.indexOf(":") + 1) : source;
+  const nice: Record<string, string> = { productType: "Product type", vendor: "Brand", tag: "Tag" };
+  return nice[raw] ?? raw.charAt(0).toUpperCase() + raw.slice(1);
+}
 import {
   normalizeQuery,
   expandSynonyms,
@@ -437,7 +458,12 @@ export class PostgresSearchEngine implements SearchEngine {
     }
 
     // 4. Filter predicates.
-    const filterPreds = buildFilterPredicates(q.filters, q.price, q.collection);
+    // A merged target ("Red") filters by every raw value folded into it.
+    const filterPreds = buildFilterPredicates(
+      expandMergedSelection(q.filters, cfg.merges),
+      q.price,
+      q.collection,
+    );
     const whereOrganic = combine([
       ...base,
       textPred,
@@ -495,6 +521,7 @@ export class PostgresSearchEngine implements SearchEngine {
       filterPreds,
       cfg,
       signature,
+      q.collection,
     );
 
     const [rows, countRows, facets] = await Promise.all([
@@ -533,6 +560,7 @@ export class PostgresSearchEngine implements SearchEngine {
       perPage: q.perPage,
       facets,
       presets: cfg.presets,
+      ...(hasTerm && cfg.banners.has(normalized) ? { banners: cfg.banners.get(normalized) } : {}),
       suggestion,
       strategy,
       tookMs: Date.now() - started,
@@ -587,6 +615,7 @@ export class PostgresSearchEngine implements SearchEngine {
     filterPreds: Map<string, Prisma.Sql>,
     cfg: Awaited<ReturnType<typeof getShopConfig>>,
     signature: string,
+    collection?: string,
   ): Promise<Facet[]> {
     const othersThan = (source: string) =>
       [...filterPreds.entries()]
@@ -603,11 +632,26 @@ export class PostgresSearchEngine implements SearchEngine {
       return combine([...baseNoAvail, textPred, ...othersThan("availability")]);
     };
 
-    const enabled = cfg.filters.filter((f) => f.enabled);
+    // A filter group assigned to this collection replaces the shop's facet set.
+    const groupSources = facetSourcesFor(collection, cfg.filterGroups);
+    const enabled = groupSources
+      ? groupSources.map(
+          (source, position) =>
+            cfg.filters.find((f) => f.source === source) ??
+            DEFAULT_FILTERS.find((f) => f.source === source) ?? {
+              source,
+              label: labelForSource(source),
+              displayAs: "checkbox" as const,
+              position,
+              enabled: true,
+            },
+        )
+      : cfg.filters.filter((f) => f.enabled);
+    const groupKey = groupSources ? `g:${groupSources.join(",")}|` : "";
 
     const built = await Promise.all(
       enabled.map((fc) =>
-        facetCache.wrap(`${signature}|${fc.source}`, async (): Promise<Facet | null> => {
+        facetCache.wrap(`${signature}|${groupKey}${fc.source}`, async (): Promise<Facet | null> => {
           if (fc.source === "price") {
             const rows = await prisma.$queryRaw<{ min: number | null; max: number | null }[]>(
               Prisma.sql`SELECT MIN(p."priceMin") AS min, MAX(p."priceMax") AS max
@@ -692,7 +736,7 @@ export class PostgresSearchEngine implements SearchEngine {
               ? (v: string) => cfg.collectionTitles.get(v) ?? v
               : (v: string) => v;
 
-          const values: FacetValue[] = rows.map((r) => {
+          let values: FacetValue[] = rows.map((r) => {
             const swatch = cfg.swatches.get(String(r.value).toLowerCase());
             return {
               value: r.value,
@@ -701,6 +745,12 @@ export class PostgresSearchEngine implements SearchEngine {
               ...(swatch ? { swatch } : {}),
             };
           });
+          values = mergeFacetValues(fc.source, values, cfg.merges);
+          if (isSizeSource(fc.source)) {
+            const order = sortSizeValues(values.map((v) => v.value), cfg.sizeRanks);
+            const byValue = new Map(values.map((v) => [v.value, v]));
+            values = order.map((v) => byValue.get(v)!);
+          }
 
           return {
             source: fc.source,
@@ -763,7 +813,7 @@ export class PostgresSearchEngine implements SearchEngine {
     const fuzzy = q.typoTolerance !== false;
     // Empty query → recommendations (popular products, collections, trending searches).
     if (!normalized) {
-      return this.recommendations(q.shopId, q.limit, q.includeUnavailable);
+      return this.recommendations(q.shopId, q.limit, q.includeUnavailable, cfg);
     }
 
     // A redirect configured for this term should fire from the dropdown too,
@@ -841,7 +891,9 @@ export class PostgresSearchEngine implements SearchEngine {
 
     return {
       products: rows.map((r) => rowToHit(r)),
-      suggestions: sugg.map((s) => s.normalized).filter((s) => s !== normalized),
+      suggestions: sugg
+        .map((s) => s.normalized)
+        .filter((s) => s !== normalized && !isSuggestionBlocked(s, cfg.blacklist)),
       collections: collRows.map((c) => ({
         handle: c.handle,
         title: c.title,
@@ -896,10 +948,17 @@ export class PostgresSearchEngine implements SearchEngine {
     shopId: string,
     limit: number,
     includeUnavailable?: boolean,
+    cfg?: Awaited<ReturnType<typeof getShopConfig>>,
   ): Promise<AutocompleteResult> {
     const availPred = includeUnavailable
       ? Prisma.sql`TRUE`
       : Prisma.sql`p."available" = TRUE`;
+
+    // Merchant-chosen empty-search products come first, in their order.
+    const pinnedIds = cfg?.settings.emptySearchProductIds ?? [];
+    const pinOrder = pinnedIds.length
+      ? Prisma.sql`array_position(ARRAY[${Prisma.join(pinnedIds)}]::text[], p."productId") ASC NULLS LAST,`
+      : Prisma.sql``;
 
     const [prodRows, collRows, trending] = await Promise.all([
       // Popular / recent products.
@@ -908,7 +967,7 @@ export class PostgresSearchEngine implements SearchEngine {
         FROM "Product" p
         WHERE p."shopId" = ${shopId} AND p."status" = 'ACTIVE'
           AND p."publishedOnline" = TRUE AND ${availPred}
-        ORDER BY p."popularity" DESC, p."publishedAt" DESC NULLS LAST
+        ORDER BY ${pinOrder} p."popularity" DESC, p."publishedAt" DESC NULLS LAST
         LIMIT ${limit}`),
       // Biggest collections.
       prisma.$queryRaw<any[]>(Prisma.sql`
@@ -925,7 +984,9 @@ export class PostgresSearchEngine implements SearchEngine {
 
     return {
       products: prodRows.map((r) => rowToHit(r)),
-      suggestions: trending.map((t) => t.normalized),
+      suggestions: trending
+        .map((t) => t.normalized)
+        .filter((t) => !cfg || !isSuggestionBlocked(t, cfg.blacklist)),
       collections: collRows.map((c) => ({
         handle: c.handle,
         title: c.title,
