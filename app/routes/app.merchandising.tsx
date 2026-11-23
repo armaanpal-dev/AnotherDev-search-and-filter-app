@@ -8,6 +8,8 @@ import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { Row, Empty, useSaveToast } from "../components/ui";
+import { parseQueryList } from "../lib/search/features";
+import { exportRulesCsv, parseRulesCsv } from "../lib/merch/csv";
 
 const ids = (v: FormDataEntryValue | null) =>
   String(v || "")
@@ -145,19 +147,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       data: { active: form.get("active") === "true" },
     });
   } else if (intent === "createRedirect") {
-    const query = String(form.get("query") || "").trim().toLowerCase();
+    // Several terms can share one target ("sale, offers, discount").
+    const queries = parseQueryList(form.get("query"));
     const url = String(form.get("url") || "").trim();
     // Only same-origin paths. An absolute URL here would turn the merchant's own
     // search box into an open redirect for anyone who can guess the term.
-    if (query && url.startsWith("/") && !url.startsWith("//")) {
-      await prisma.redirect.upsert({
-        where: { shopId_query: { shopId: shop.id, query } },
-        create: { shopId: shop.id, query, url },
-        update: { url, active: true },
-      });
-    } else if (query && url) {
+    if (queries.length && url.startsWith("/") && !url.startsWith("//")) {
+      await prisma.$transaction(
+        queries.map((query) =>
+          prisma.redirect.upsert({
+            where: { shopId_query: { shopId: shop.id, query } },
+            create: { shopId: shop.id, query, url },
+            update: { url, active: true },
+          }),
+        ),
+      );
+    } else if (queries.length && url) {
       return { error: "Redirect targets must be a path on your store, e.g. /collections/sale" };
     }
+  } else if (intent === "importRules") {
+    const { rows, errors } = parseRulesCsv(String(form.get("csv") || "").slice(0, 2_000_000));
+    if (rows.length) {
+      await prisma.merchandisingRule.createMany({ data: rows.map((r) => ({ shopId: shop.id, ...r })) });
+    }
+    invalidateShopConfig(shop.id);
+    if (errors.length) {
+      return { error: `Imported ${rows.length} rule(s). ${errors.length} row(s) skipped: ${errors.slice(0, 5).join(" ")}` };
+    }
+    return { ok: true, imported: rows.length };
   } else if (intent === "deleteRedirect") {
     await prisma.redirect.deleteMany({ where: { id: String(form.get("id")), shopId: shop.id } });
   }
@@ -322,6 +339,44 @@ export default function MerchandisingPage() {
         </fetcher.Form>
       </s-section>
 
+      <s-section heading="Import and export">
+        <s-paragraph>
+          <s-text color="subdued">
+            Move rules between stores or edit many at once in a spreadsheet. Columns:
+            name, trigger_query, trigger_collection, pinned, boosted, buried, hidden
+            (space-separated product ids), priority, active.
+          </s-text>
+        </s-paragraph>
+        <s-stack direction="inline" gap="small-300">
+          <s-button
+            variant="secondary"
+            onClick={() => {
+              const blob = new Blob([exportRulesCsv(rules)], { type: "text/csv" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = "merchandising-rules.csv";
+              a.click();
+              URL.revokeObjectURL(a.href);
+            }}
+          >
+            Export CSV
+          </s-button>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <s-text>Import CSV:</s-text>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={async (e) => {
+                const file = e.currentTarget.files?.[0];
+                if (!file) return;
+                fetcher.submit({ intent: "importRules", csv: await file.text() }, { method: "post" });
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </s-stack>
+      </s-section>
+
       <s-section heading="Search redirects">
         <s-paragraph>
           <s-text color="subdued">
@@ -332,7 +387,7 @@ export default function MerchandisingPage() {
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="createRedirect" />
           <s-grid gridTemplateColumns="1fr 1fr auto" gap="base" alignItems="end">
-            <s-text-field name="query" label="When someone searches" defaultValue={sp.get("redirect") ?? ""} />
+            <s-text-field name="query" label="When someone searches" details="Separate several terms with commas" defaultValue={sp.get("redirect") ?? ""} />
             <s-text-field name="url" label="Send them to (a path on your store)" placeholder="/collections/sale" />
             <s-button variant="primary" type="submit">Add redirect</s-button>
           </s-grid>

@@ -111,7 +111,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     showOutOfStock: checkbox("showOutOfStock"),
     collectionFilters: checkbox("collectionFilters"),
     showVendor: checkbox("showVendor"),
-    quickAdd: checkbox("quickAdd"),
+    cardAction: field("cardAction"),
+    marketPricing: checkbox("marketPricing"),
     minChars: numeric("minChars"),
     maxSuggestions: numeric("maxSuggestions"),
     resultsPerPage: numeric("resultsPerPage"),
@@ -423,7 +424,7 @@ export default function SettingsPage() {
           <Live label="Search page" on={s.searchTakeover} />
           <Live label="Collection filters" on={s.collectionFilters} />
           <Live label="Typo tolerance" on={s.typoTolerance} />
-          <Live label="Quick add to cart" on={s.quickAdd} />
+          <Live label={s.cardAction === "quick_view" ? "Quick view" : "Quick add to cart"} on={s.cardAction !== "none"} />
           <Live label="Revenue tracking" on={pixel === "active"} />
         </s-grid>
         <s-text color="subdued">Storefront: {domain}</s-text>
@@ -514,7 +515,21 @@ export default function SettingsPage() {
               <s-number-field name="gridColumnsMobile" label="Cards per row on mobile" min={1} max={4} defaultValue={String(s.gridColumnsMobile)} />
             </s-grid>
             <Check name="showVendor" checked={s.showVendor} label="Show the brand name on result cards" />
-            <Check name="quickAdd" checked={s.quickAdd} label="Add to cart directly from results (single-variant products)" />
+            <s-select
+              name="cardAction"
+              label="Button on result cards"
+              value={s.cardAction}
+              details="Quick view opens a pop-up with options, quantity and add to cart. Quick add adds single-variant products straight to the cart."
+            >
+              <s-option value="quick_add">Quick add to cart (current behaviour)</s-option>
+              <s-option value="quick_view">Quick view</s-option>
+              <s-option value="none">No button, link to the product</s-option>
+            </s-select>
+            <Check
+              name="marketPricing"
+              checked={s.marketPricing}
+              label="Show each shopper their own market's prices and stock (Shopify Markets)"
+            />
           </s-stack>
         </s-section>
 
@@ -1332,7 +1347,7 @@ function WidgetPreview({
                 >
                   £00.00
                 </div>
-                {p.quickAdd && !themeCards && (
+                {p.cardAction !== "none" && !themeCards && (
                   <div
                     style={{
                       marginTop: 6,
@@ -1345,7 +1360,7 @@ function WidgetPreview({
                       display: p.cardButtonFullWidth ? "block" : "inline-block",
                     }}
                   >
-                    {p.cardButtonLabel}
+                    {p.cardAction === "quick_view" ? "Quick view" : p.cardButtonLabel}
                   </div>
                 )}
               </div>
