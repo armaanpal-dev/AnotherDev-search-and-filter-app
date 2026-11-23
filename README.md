@@ -19,7 +19,6 @@ synced from Shopify. This section maps every test requirement to the code that
 implements it.
 
 ### See it running
-
 | | |
 |---|---|
 | Live storefront | `https://<STORE>.myshopify.com/collections/all` (password: `<PASSWORD>`) |
