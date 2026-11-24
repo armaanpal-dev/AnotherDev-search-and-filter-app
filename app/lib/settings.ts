@@ -149,6 +149,8 @@ export interface WidgetSettings {
   emptySearchProductIds: string[];
   /** Show prices/availability for the shopper's country (Shopify Markets). */
   marketPricing: boolean;
+  /** Hide products that cannot be bought in the shopper's country. */
+  countryAvailability: boolean;
   // ---- Filter display (ported from the source app's filter settings) ----
   filterSidebarWidth: number;   // px, sidebar layout
   filterDrawerWidth: number;    // px, drawer / mobile off-canvas
@@ -246,6 +248,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   quickViewSource: "app",
   emptySearchProductIds: [],
   marketPricing: false,
+  countryAvailability: false,
   filterSidebarWidth: 240,
   filterDrawerWidth: 340,
   priceFilterStyle: "both",
@@ -334,6 +337,7 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     quickViewSource: oneOf(s.quickViewSource, ["app", "theme"], DEFAULT_SETTINGS.quickViewSource),
     emptySearchProductIds: idList(s.emptySearchProductIds, 24),
     marketPricing: bool(s.marketPricing, DEFAULT_SETTINGS.marketPricing),
+    countryAvailability: bool(s.countryAvailability, DEFAULT_SETTINGS.countryAvailability),
     filterSidebarWidth: num(s.filterSidebarWidth, DEFAULT_SETTINGS.filterSidebarWidth, 160, 420),
     filterDrawerWidth: num(s.filterDrawerWidth, DEFAULT_SETTINGS.filterDrawerWidth, 260, 560),
     priceFilterStyle: oneOf(s.priceFilterStyle, ["both", "slider", "inputs"], DEFAULT_SETTINGS.priceFilterStyle),

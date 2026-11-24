@@ -77,6 +77,8 @@ model Shop {
   // writing through the API, a dropped delivery), and a merchant will not
   // re-sync by hand — so the index quietly drifts without this.
   autoSyncEnabled Boolean   @default(true)
+  // Storefront API token this app created for country availability checks.
+  storefrontToken String?
   lastAutoSyncAt  DateTime?
 
   products      Product[]
@@ -95,6 +97,7 @@ model Shop {
   mergedValues  MergedValue[]
   filterGroups  FilterGroup[]
   filterUsage   FilterUsage[]
+  countryAvailability CountryAvailability[]
 
   updatedAt    DateTime @updatedAt
 }
@@ -463,4 +466,17 @@ model FilterUsage {
 
   @@unique([shopId, day, source, value])
   @@index([shopId, day])
+}
+
+// Products NOT for sale in a country (Storefront API @inContext answer).
+// Only the exceptions are stored; most products sell everywhere.
+model CountryAvailability {
+  id          String   @id @default(cuid())
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  country     String   // ISO 3166-1 alpha-2
+  unavailable String[] @default([]) // Shopify product ids (numeric part)
+  checkedAt   DateTime @default(now())
+
+  @@unique([shopId, country])
 }

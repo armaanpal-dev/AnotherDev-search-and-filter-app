@@ -42,6 +42,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     typoTolerance: settings.typoTolerance,
     semantic: settings.semanticSearch,
     variantAvailability: settings.variantAvailabilityFilter,
+    country: settings.countryAvailability
+      ? url.searchParams.get("country")?.toUpperCase() ?? undefined
+      : undefined,
     bucket,
   });
 

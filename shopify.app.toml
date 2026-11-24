@@ -13,7 +13,7 @@ embedded = true
 # search that produced it. Checkout runs on Shopify's domain, so there is no
 # other way to measure search-driven revenue. The pixel reads no customer data —
 # see extensions/anotherdev-pixel/src/index.js.
-scopes = "read_products,read_product_listings,read_collection_listings,read_inventory,read_content,read_themes,write_pixels,read_customer_events"
+scopes = "read_products,read_product_listings,read_collection_listings,read_inventory,read_content,read_themes,unauthenticated_read_product_listings,write_pixels,read_customer_events"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

@@ -34,6 +34,8 @@ export interface SearchQuery {
   facetsOnly?: boolean;
   // Include out-of-stock products in results
   includeUnavailable?: boolean;
+  // Shopper country; with countryAvailability on, products not sold there are dropped.
+  country?: string;
   // Option filters require the MATCHING variant to be in stock.
   variantAvailability?: boolean;
   // Merchant toggle: when false, fuzzy/trigram matching is skipped (exact only).

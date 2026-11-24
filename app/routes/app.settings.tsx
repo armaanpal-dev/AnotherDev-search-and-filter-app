@@ -1,3 +1,7 @@
+import {
+  connectCountryAvailability,
+  refreshCountryAvailability,
+} from "../lib/markets/country.server";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
@@ -46,6 +50,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     pixelReason: pixel.reason ?? null,
     missingScopes: missingPixelScopes(session.scope),
     requiredScopes: PIXEL_SCOPES,
+    country: {
+      connected: Boolean(shop.storefrontToken),
+      ...(await prisma.countryAvailability.aggregate({
+        where: { shopId: shop.id },
+        _count: { _all: true },
+        _max: { checkedAt: true },
+      }).then((a) => ({ countries: a._count._all, checkedAt: a._max.checkedAt?.toISOString() ?? null }))),
+    },
   };
 };
 
@@ -69,6 +81,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     invalidateShopConfig(shop.id);
     return { ok: true };
+  }
+
+  if (intent === "countryConnect" || intent === "countryRefresh") {
+    try {
+      if (intent === "countryConnect") await connectCountryAvailability(shop.id, admin);
+      // Checking every country can take minutes on a big catalog; do it in the
+      // background and let the page show the result on the next visit.
+      void refreshCountryAvailability(shop.id).catch((e) =>
+        console.error("[country] refresh failed:", e?.message),
+      );
+      return { ok: true, countryStarted: true };
+    } catch (e: any) {
+      return {
+        ok: false,
+        error:
+          (e?.message ?? "Could not connect.") +
+          " Reload the app and approve the new storefront permission, then try again.",
+      };
+    }
   }
 
   if (intent === "pixelOn" || intent === "pixelOff") {
@@ -114,6 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     cardAction: field("cardAction"),
     quickViewSource: field("quickViewSource"),
     marketPricing: checkbox("marketPricing"),
+    countryAvailability: checkbox("countryAvailability"),
     minChars: numeric("minChars"),
     maxSuggestions: numeric("maxSuggestions"),
     resultsPerPage: numeric("resultsPerPage"),
@@ -349,8 +381,10 @@ export default function SettingsPage() {
     pixelReason,
     missingScopes,
     requiredScopes,
+    country,
   } =
     useLoaderData<typeof loader>();
+  const countryFetcher = useFetcher<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const pixelFetcher = useFetcher<typeof action>();
   const s = settings;
@@ -546,6 +580,38 @@ export default function SettingsPage() {
               checked={s.marketPricing}
               label="Show each shopper their own market's prices and stock (Shopify Markets)"
             />
+            <Check
+              name="countryAvailability"
+              checked={s.countryAvailability}
+              label="Hide products that can't be bought in the shopper's country"
+            />
+            <s-stack direction="inline" gap="small-300" alignItems="center">
+              <s-button
+                type="button"
+                variant="secondary"
+                {...(countryFetcher.state !== "idle" ? { loading: true } : {})}
+                onClick={() =>
+                  countryFetcher.submit(
+                    { intent: country.connected ? "countryRefresh" : "countryConnect" },
+                    { method: "post" },
+                  )
+                }
+              >
+                {country.connected ? "Re-check countries now" : "Connect country availability"}
+              </s-button>
+              <s-text color="subdued">
+                {countryFetcher.data && "countryStarted" in countryFetcher.data
+                  ? "Checking every country in the background. This can take a few minutes."
+                  : country.connected
+                    ? country.checkedAt
+                      ? `${country.countries} countries checked, last ${new Date(country.checkedAt).toLocaleString()}. Re-checked nightly.`
+                      : "Connected. The first check is running."
+                    : "Not connected. Needed before hiding works."}
+              </s-text>
+            </s-stack>
+            {countryFetcher.data && "error" in countryFetcher.data && countryFetcher.data.error && (
+              <s-banner tone="critical">{countryFetcher.data.error}</s-banner>
+            )}
           </s-stack>
         </s-section>
 

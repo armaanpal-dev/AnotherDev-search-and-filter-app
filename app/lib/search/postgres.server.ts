@@ -334,6 +334,13 @@ export class PostgresSearchEngine implements SearchEngine {
       Prisma.sql`p."status" = 'ACTIVE'`,
       Prisma.sql`p."publishedOnline" = TRUE`,
     ];
+    // Country availability: drop products Shopify says are not for sale in the
+    // shopper's country. Part of `base`, so totals and facets agree.
+    if (q.country && /^[A-Z]{2}$/.test(q.country)) {
+      base.push(Prisma.sql`NOT EXISTS (SELECT 1 FROM "CountryAvailability" ca
+        WHERE ca."shopId" = ${q.shopId} AND ca."country" = ${q.country}
+          AND p."productId" = ANY(ca."unavailable"))`);
+    }
     const availPred: Prisma.Sql | null = q.includeUnavailable
       ? null
       : Prisma.sql`p."available" = TRUE`;
