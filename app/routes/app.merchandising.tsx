@@ -188,7 +188,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: "Redirect targets must be a path on your store, e.g. /collections/sale" };
     }
   } else if (intent === "importRules") {
-    const { rows, errors } = parseRulesCsv(String(form.get("csv") || "").slice(0, 2_000_000));
+    const parsed = parseRulesCsv(String(form.get("csv") || "").slice(0, 2_000_000));
+    const errors = parsed.errors;
+    // Search loads at most 500 rules per shop (config.server.ts); importing past
+    // that would create rules that silently never apply.
+    const existing = await prisma.merchandisingRule.count({ where: { shopId: shop.id } });
+    const room = Math.max(0, 500 - existing);
+    const rows = parsed.rows.slice(0, room);
+    if (parsed.rows.length > room) {
+      errors.push(`${parsed.rows.length - room} row(s) not imported: a store can have at most 500 rules.`);
+    }
     if (rows.length) {
       await prisma.merchandisingRule.createMany({ data: rows.map((r) => ({ shopId: shop.id, ...r })) });
     }

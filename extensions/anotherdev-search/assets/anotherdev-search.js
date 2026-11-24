@@ -1278,7 +1278,9 @@
     if (!Dialog || typeof Dialog.prototype.show !== "function") return null;
     if (typeof window.HTMLUpdateUtility === "undefined" || typeof HTMLUpdateUtility.setInnerHTML !== "function") return null;
     var modal = document.querySelector("quick-add-modal");
+    var built = false;
     if (!modal) {
+      built = true;
       // A grid of single-variant products loads Quick Add's scripts without
       // rendering a modal; build Dawn's documented empty shell.
       var tpl = document.createElement("template");
@@ -1290,6 +1292,7 @@
     }
     var ok = typeof modal.preprocessHTML === "function" && typeof modal.hide === "function" &&
       modal.querySelector('[id^="QuickAddInfo-"]') && modal.querySelector('[role="dialog"]');
+    if (!ok && built) modal.remove();
     return ok ? modal : null;
   }
 
@@ -3642,7 +3645,10 @@
     cfg.quickViewSource = s.quickViewSource === "theme" ? "theme" : "app";
     if (s.filterSidebarWidth) document.documentElement.style.setProperty("--adsf-sidebar-w", s.filterSidebarWidth + "px");
     if (s.filterDrawerWidth) document.documentElement.style.setProperty("--adsf-drawer-w", s.filterDrawerWidth + "px");
-    if (cfg.facetColumns) document.documentElement.style.setProperty("--adsf-facet-cols", String(cfg.facetColumns));
+    if (cfg.facetColumns) {
+      document.documentElement.style.setProperty("--adsf-facet-cols", String(cfg.facetColumns));
+      document.documentElement.classList.add("adsf-has-facet-cols");
+    }
     injectCustomCode(s);
     cfg.swatches = s.swatches || {};
     cfg.presets = Array.isArray(s.presets) ? s.presets : [];

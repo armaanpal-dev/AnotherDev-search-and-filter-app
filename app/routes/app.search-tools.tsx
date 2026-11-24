@@ -1,6 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
-import { useState } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -116,28 +115,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 type Banner = Awaited<ReturnType<typeof loader>>["banners"][number];
 
 function BannerFields({ b }: { b?: Banner }) {
-  const [placement, setPlacement] = useState(b?.placement ?? "top");
   return (
     <s-stack direction="block" gap="base">
       <s-grid gridTemplateColumns="2fr 1fr 1fr" gap="base" alignItems="end">
         <s-text-field name="query" label="Search term" defaultValue={b?.query ?? ""} details="Shown when a shopper searches exactly this" />
-        <s-select
-          name="placement"
-          label="Placement"
-          value={placement}
-          onChange={(e: any) => setPlacement(e.currentTarget.value)}
-        >
+        <s-select name="placement" label="Placement" value={b?.placement ?? "top"}>
           <s-option value="top">Top of results</s-option>
           <s-option value="grid">In the product grid</s-option>
         </s-select>
-        {placement === "grid" ? (
-          <s-number-field name="position" label="Grid position" min={1} max={48} defaultValue={String(b?.position ?? 1)} />
-        ) : (
-          <input type="hidden" name="position" value="1" />
-        )}
+        <s-number-field
+          name="position"
+          label="Grid position"
+          min={1}
+          max={48}
+          defaultValue={String(b?.position ?? 1)}
+          details="Grid banners only"
+        />
       </s-grid>
       <s-grid gridTemplateColumns="1fr 1fr" gap="base">
-        <s-url-field name="imageUrl" label="Image URL" defaultValue={b?.imageUrl ?? ""} details={placement === "top" ? "Required" : "Optional if you add a heading"} />
+        <s-url-field name="imageUrl" label="Image URL" defaultValue={b?.imageUrl ?? ""} details="Required for top banners" />
         <s-text-field name="targetUrl" label="Link" defaultValue={b?.targetUrl ?? ""} details="e.g. /collections/sale" />
         <s-text-field name="heading" label="Heading" defaultValue={b?.heading ?? ""} />
         <s-text-field name="buttonLabel" label="Button label" defaultValue={b?.buttonLabel ?? ""} />

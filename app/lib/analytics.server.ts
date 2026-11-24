@@ -632,13 +632,16 @@ export async function recordFilterUsage(
         values.map((value) => ({ source: source.slice(0, 80), value: value.slice(0, 120) })),
       )
       .slice(0, 20);
-    for (const { source, value } of pairs) {
-      await prisma.filterUsage.upsert({
-        where: { shopId_day_source_value: { shopId, day, source, value } },
-        create: { shopId, day, source, value, count: 1 },
-        update: { count: { increment: 1 } },
-      });
-    }
+    if (!pairs.length) return;
+    const rows = pairs.map(
+      ({ source, value }) =>
+        Prisma.sql`(${"fu_" + crypto.randomUUID()}, ${shopId}, ${day}::date, ${source}, ${value}, 1)`,
+    );
+    await prisma.$executeRaw(Prisma.sql`
+      INSERT INTO "FilterUsage" ("id", "shopId", "day", "source", "value", "count")
+      VALUES ${Prisma.join(rows)}
+      ON CONFLICT ("shopId", "day", "source", "value")
+      DO UPDATE SET "count" = "FilterUsage"."count" + 1`);
   } catch {
     // Analytics must never break search.
   }

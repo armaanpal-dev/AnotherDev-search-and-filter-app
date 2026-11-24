@@ -12,9 +12,25 @@ import {
   facetSourcesFor,
   isSizeSource,
   isSuggestionBlocked,
-  mergeFacetValues,
   sortSizeValues,
+  type MergeRule,
 } from "./features";
+
+/**
+ * SQL that maps a raw facet value to its merged target, or returns it as is.
+ * Returns an identity wrapper when the facet has no merges, so the common case
+ * produces exactly the SQL it did before.
+ */
+function mergedValueExpr(source: string, merges: MergeRule[]) {
+  const relevant = merges.filter((m) => m.source === source && m.sourceValues.length);
+  return (col: Prisma.Sql): Prisma.Sql => {
+    if (!relevant.length) return col;
+    const whens = relevant.map(
+      (m) => Prisma.sql`WHEN ${col} IN (${Prisma.join(m.sourceValues)}) THEN ${m.target}`,
+    );
+    return Prisma.sql`(CASE ${Prisma.join(whens, " ")} ELSE ${col} END)`;
+  };
+}
 
 /** "option:Color" -> "Color", "metafield:material" -> "Material". */
 function labelForSource(source: string): string {
@@ -706,20 +722,24 @@ export class PostgresSearchEngine implements SearchEngine {
 
           const where = whereExcept(fc.source);
           let rows: { value: string; count: bigint }[] = [];
+          // Merged values ("Crimson", "red" -> "Red") are folded BEFORE grouping
+          // and counted with COUNT(DISTINCT): a product carrying two folded values
+          // is one product, so the count matches what clicking it returns.
+          const merged = mergedValueExpr(fc.source, cfg.merges);
 
           if (fc.source === "vendor") {
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT p."vendor" AS value, COUNT(*)::bigint AS count FROM "Product" p
-              WHERE ${where} AND p."vendor" <> '' GROUP BY p."vendor" ORDER BY count DESC LIMIT 50`);
+              SELECT ${merged(Prisma.sql`p."vendor"`)} AS value, COUNT(DISTINCT p."id")::bigint AS count FROM "Product" p
+              WHERE ${where} AND p."vendor" <> '' GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source === "productType") {
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT p."productType" AS value, COUNT(*)::bigint AS count FROM "Product" p
-              WHERE ${where} AND p."productType" <> '' GROUP BY p."productType" ORDER BY count DESC LIMIT 50`);
+              SELECT ${merged(Prisma.sql`p."productType"`)} AS value, COUNT(DISTINCT p."id")::bigint AS count FROM "Product" p
+              WHERE ${where} AND p."productType" <> '' GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source === "tag") {
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT tag AS value, COUNT(*)::bigint AS count
+              SELECT ${merged(Prisma.sql`tag`)} AS value, COUNT(DISTINCT p."id")::bigint AS count
               FROM "Product" p, unnest(p."tags") AS tag
-              WHERE ${where} GROUP BY tag ORDER BY count DESC LIMIT 50`);
+              WHERE ${where} GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source === "collection") {
             rows = await prisma.$queryRaw(Prisma.sql`
               SELECT handle AS value, COUNT(*)::bigint AS count
@@ -728,15 +748,15 @@ export class PostgresSearchEngine implements SearchEngine {
           } else if (fc.source.startsWith("option:")) {
             const opt = fc.source.slice("option:".length);
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT val AS value, COUNT(*)::bigint AS count
+              SELECT ${merged(Prisma.sql`val`)} AS value, COUNT(DISTINCT p."id")::bigint AS count
               FROM "Product" p, jsonb_array_elements_text(COALESCE(p."options" -> ${opt}, '[]'::jsonb)) AS val
-              WHERE ${where} GROUP BY val ORDER BY count DESC LIMIT 50`);
+              WHERE ${where} GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source.startsWith("metafield:")) {
             // Metafield facets were configurable but never counted, so the facet
             // simply never appeared. Aggregate over the mirrored metafield map.
             const key = fc.source.slice("metafield:".length);
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT p."metafields" ->> ${key} AS value, COUNT(*)::bigint AS count
+              SELECT ${merged(Prisma.sql`(p."metafields" ->> ${key})`)} AS value, COUNT(DISTINCT p."id")::bigint AS count
               FROM "Product" p
               WHERE ${where} AND COALESCE(p."metafields" ->> ${key}, '') <> ''
               GROUP BY 1 ORDER BY count DESC LIMIT 50`);
@@ -759,7 +779,6 @@ export class PostgresSearchEngine implements SearchEngine {
               ...(swatch ? { swatch } : {}),
             };
           });
-          values = mergeFacetValues(fc.source, values, cfg.merges);
           if (isSizeSource(fc.source)) {
             const order = sortSizeValues(values.map((v) => v.value), cfg.sizeRanks);
             const byValue = new Map(values.map((v) => [v.value, v]));
@@ -1185,6 +1204,9 @@ function facetSignature(
     // computed over, so a shop that has it on must not share counts with the
     // same query served while the embeddings provider was unreachable.
     q.semantic === false ? "0" : "1",
+    // Both change which products the facets are counted over.
+    q.country ?? "",
+    q.variantAvailability ? "va" : "",
     filters,
     price,
     ruleKey,

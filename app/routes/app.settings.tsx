@@ -247,9 +247,9 @@ type TabKey = "search" | "filters" | "cards" | "advanced";
 
 const TABS: { key: TabKey; label: string; blurb: string }[] = [
   { key: "search", label: "Search", blurb: "Behaviour, relevance, panel layout, colours and fonts" },
-  { key: "filters", label: "Filters", blurb: "Collection pages, filter appearance and colour swatches" },
-  { key: "cards", label: "Product cards", blurb: "Grid size, image shape and card appearance" },
-  { key: "advanced", label: "Advanced", blurb: "Indexing, search language and revenue tracking" },
+  { key: "filters", label: "Filters", blurb: "Collection pages, filter appearance, behaviour and colour swatches" },
+  { key: "cards", label: "Product cards", blurb: "Grid size, card appearance, quick view and market pricing" },
+  { key: "advanced", label: "Advanced", blurb: "Indexing, search language, revenue tracking, integrations and custom code" },
 ];
 
 const PREVIEW_HEADING: Record<TabKey, string> = {
@@ -567,7 +567,7 @@ export default function SettingsPage() {
               value={s.cardAction}
               details="Quick view opens a pop-up with options, quantity and add to cart. Quick add adds single-variant products straight to the cart."
             >
-              <s-option value="quick_add">Quick add to cart (current behaviour)</s-option>
+              <s-option value="quick_add">Quick add to cart</s-option>
               <s-option value="quick_view">Quick view</s-option>
               <s-option value="none">No button, link to the product</s-option>
             </s-select>

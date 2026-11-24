@@ -1005,10 +1005,14 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 }
 
 /* ---- Filter display options --------------------------------------------- */
-.adsf-facet__list { display: grid; grid-template-columns: repeat(var(--adsf-facet-cols, 1), minmax(0, 1fr)); }
-.adsf-facet--swatch .adsf-facet__list { grid-template-columns: repeat(var(--adsf-facet-cols, auto-fill), minmax(0, max-content)); }
-.adsf-facet--button .adsf-facet__list {
-  display: flex; flex-wrap: wrap; gap: 6px;
+/* "Options per row": only when the merchant set it; otherwise the list keeps
+   its original one-per-line column. */
+.adsf-has-facet-cols .adsf-facet__list {
+  display: grid; grid-template-columns: repeat(var(--adsf-facet-cols), minmax(0, 1fr));
+}
+.adsf-facet--button .adsf-facet__list,
+.adsf-has-facet-cols .adsf-facet--button .adsf-facet__list {
+  display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px;
 }
 .adsf-facet__item--button input { position: absolute; opacity: 0; pointer-events: none; }
 .adsf-facet__item--button label {

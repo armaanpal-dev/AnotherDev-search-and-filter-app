@@ -71,7 +71,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     case "group.create":
     case "group.update": {
       const name = String(form.get("name") ?? "").trim().slice(0, 80);
-      const collections = form.getAll("collections").map(String).filter(Boolean).slice(0, 200);
+      // One entry per ticked choice, or one comma-joined entry: accept both.
+      const collections = [
+        ...new Set(form.getAll("collections").flatMap((v) => String(v).split(",")).map((v) => v.trim()).filter(Boolean)),
+      ].slice(0, 200);
       const sources = list(form.get("sources"), 30);
       if (!name || !collections.length || !sources.length) {
         return { error: "A filter group needs a name, at least one collection and at least one filter." };
@@ -102,9 +105,11 @@ function GroupFields({ g, sources, collections }: { g?: Data["groups"][number]; 
   return (
     <s-stack direction="block" gap="base">
       <s-text-field name="name" label="Name" defaultValue={g?.name ?? ""} />
-      <s-choice-list name="collections" label="Collections" multiple values={g?.collections ?? []}>
+      <s-choice-list name="collections" label="Collections" multiple>
         {collections.map((c) => (
-          <s-choice key={c.handle} value={c.handle}>{c.title}</s-choice>
+          <s-choice key={c.handle} value={c.handle} selected={g?.collections.includes(c.handle) ?? false}>
+            {c.title}
+          </s-choice>
         ))}
       </s-choice-list>
       <s-text-area
