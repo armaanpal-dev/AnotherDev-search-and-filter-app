@@ -143,6 +143,8 @@ export interface WidgetSettings {
    * step with it for the storefront code that still reads it.
    */
   cardAction: "quick_add" | "quick_view" | "none";
+  /** Whose Quick View opens: the app's, or the theme's where it is supported (Dawn, Prestige 10.11). */
+  quickViewSource: "app" | "theme";
   /** Products shown first when the search box is focused but empty (Shopify ids). */
   emptySearchProductIds: string[];
   /** Show prices/availability for the shopper's country (Shopify Markets). */
@@ -241,6 +243,7 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   showVendor: false,
   quickAdd: false,
   cardAction: "none",
+  quickViewSource: "app",
   emptySearchProductIds: [],
   marketPricing: false,
   filterSidebarWidth: 240,
@@ -328,6 +331,7 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     gridColumnsMobile: num(s.gridColumnsMobile, DEFAULT_SETTINGS.gridColumnsMobile, 1, 4),
     showVendor: bool(s.showVendor, DEFAULT_SETTINGS.showVendor),
     ...cardActionFields(s),
+    quickViewSource: oneOf(s.quickViewSource, ["app", "theme"], DEFAULT_SETTINGS.quickViewSource),
     emptySearchProductIds: idList(s.emptySearchProductIds, 24),
     marketPricing: bool(s.marketPricing, DEFAULT_SETTINGS.marketPricing),
     filterSidebarWidth: num(s.filterSidebarWidth, DEFAULT_SETTINGS.filterSidebarWidth, 160, 420),

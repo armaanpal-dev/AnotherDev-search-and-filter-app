@@ -1255,6 +1255,114 @@
     try { document.dispatchEvent(new CustomEvent("wishlist:refresh")); } catch (e) { /* old browser */ }
   }
 
+
+  /* ------------------------------------------------------------------------
+     Theme Quick View adapters (setting quickViewSource: "theme").
+     Only explicit, verified component contracts are used; anything else falls
+     back to the app's own Quick View. Ported from the source app:
+       - Dawn (and Dawn-based themes): <quick-add-modal> + HTMLUpdateUtility
+       - Prestige 10.11.0: <quick-buy-modal> / x-modal + template#quick-buy-content
+     ------------------------------------------------------------------------ */
+  function productPageUrl(handle) {
+    var root = (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || "/";
+    var url = new URL(root + "products/" + encodeURIComponent(handle), location.origin);
+    var t = window.Shopify && window.Shopify.theme;
+    if (t && t.role === "unpublished") url.searchParams.set("preview_theme_id", t.id);
+    return url.toString();
+  }
+
+  function dawnModal() {
+    var Ctor = window.customElements && customElements.get("quick-add-modal");
+    var Dialog = window.customElements && customElements.get("modal-dialog");
+    if (!Ctor || typeof Ctor.prototype.preprocessHTML !== "function") return null;
+    if (!Dialog || typeof Dialog.prototype.show !== "function") return null;
+    if (typeof window.HTMLUpdateUtility === "undefined" || typeof HTMLUpdateUtility.setInnerHTML !== "function") return null;
+    var modal = document.querySelector("quick-add-modal");
+    if (!modal) {
+      // A grid of single-variant products loads Quick Add's scripts without
+      // rendering a modal; build Dawn's documented empty shell.
+      var tpl = document.createElement("template");
+      tpl.innerHTML = '<quick-add-modal id="QuickAdd-adsf" class="quick-add-modal"><div role="dialog" aria-modal="true" aria-label="Product quick view" tabindex="-1" class="quick-add-modal__content global-settings-popup"><button type="button" id="ModalClose-adsf" class="quick-add-modal__toggle" aria-label="Close">&times;</button><div id="QuickAddInfo-adsf" class="quick-add-modal__content-info"></div></div></quick-add-modal>';
+      modal = tpl.content.firstElementChild;
+      modal.moved = true;
+      modal.dataset.section = "adsf";
+      document.body.appendChild(modal);
+    }
+    var ok = typeof modal.preprocessHTML === "function" && typeof modal.hide === "function" &&
+      modal.querySelector('[id^="QuickAddInfo-"]') && modal.querySelector('[role="dialog"]');
+    return ok ? modal : null;
+  }
+
+  function openDawn(modal, handle, trigger) {
+    return fetch(productPageUrl(handle), { credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("load"); return r.text(); })
+      .then(function (html) {
+        var page = new DOMParser().parseFromString(html, "text/html");
+        var product = page.querySelector("product-info[data-section]");
+        if (!product || !product.querySelector("product-form")) throw new Error("unsupported");
+        // Dawn's own Quick Add preprocessing: strips the rest of the page and
+        // keeps the theme's variant, price, media and cart components.
+        modal.preprocessHTML(product);
+        var content = modal.querySelector('[id^="QuickAddInfo-"]');
+        HTMLUpdateUtility.setInnerHTML(content, product.outerHTML);
+        var names = ["product-info", "product-form", "variant-selects"].filter(function (n) { return content.querySelector(n); });
+        return Promise.all(names.map(function (n) { return customElements.whenDefined(n); }));
+      })
+      .then(function () {
+        customElements.get("modal-dialog").prototype.show.call(modal, trigger);
+        return true;
+      });
+  }
+
+  function prestigeBase() {
+    var t = window.Shopify && window.Shopify.theme;
+    var QuickBuy = window.customElements && customElements.get("quick-buy-modal");
+    var XModal = window.customElements && customElements.get("x-modal");
+    if (!t || t.schema_name !== "Prestige" || t.schema_version !== "10.11.0" || !QuickBuy || !XModal) return null;
+    if (Object.getPrototypeOf(QuickBuy.prototype) !== XModal.prototype) return null;
+    if (typeof XModal.prototype.show !== "function" || !document.querySelector("template#modal-default-template")) return null;
+    return XModal.prototype;
+  }
+
+  function openPrestige(base, handle) {
+    // One instance: Prestige adds a document cart listener in its constructor.
+    var modal = document.getElementById("adsf-prestige-quick-buy");
+    if (!modal) {
+      modal = document.createElement("quick-buy-modal");
+      modal.id = "adsf-prestige-quick-buy";
+      modal.className = "quick-buy-modal modal";
+      document.body.appendChild(modal);
+    }
+    return fetch(productPageUrl(handle), { credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("load"); return r.text(); })
+      .then(function (html) {
+        var page = new DOMParser().parseFromString(html, "text/html");
+        var tpl = page.querySelector("template#quick-buy-content");
+        var content = tpl && tpl.content;
+        var formId = content && content.querySelector("product-rerender") &&
+          content.querySelector("product-rerender").getAttribute("observe-form");
+        var form = formId && content.getElementById(formId);
+        if (!form || !form.querySelector('input[name="id"]') || !form.querySelector("buy-buttons")) throw new Error("unsupported");
+        Array.prototype.forEach.call(content.querySelectorAll("noscript"), function (n) { n.remove(); });
+        modal.setAttribute("handle", handle);
+        modal.replaceChildren(content);
+        if (window.Shopify.PaymentButton) window.Shopify.PaymentButton.init();
+        // The base x-modal lifecycle; QuickBuyModal.show() would fetch again.
+        return Promise.resolve(base.show.call(modal)).then(function () { return true; });
+      });
+  }
+
+  /** Resolve true when a theme Quick View opened; false means use the app's. */
+  function openThemeQuickView(handle, trigger) {
+    try {
+      var base = prestigeBase();
+      if (base) return openPrestige(base, handle).catch(function () { return false; });
+      var modal = dawnModal();
+      if (modal) return openDawn(modal, handle, trigger).catch(function () { return false; });
+    } catch (e) { /* fall through */ }
+    return Promise.resolve(false);
+  }
+
   var qvEl = null;
   var qvReturnFocus = null;
 
@@ -1801,8 +1909,17 @@
         btn.addEventListener("click", function () {
           var productId = btn.getAttribute("data-adsf-qv-product");
           track(cfg.proxy, "click", state.term, productId);
-          openQuickView(btn.getAttribute("data-adsf-qv"), cfg, function () {
-            track(cfg.proxy, "add_to_cart", state.term, productId);
+          var handle = btn.getAttribute("data-adsf-qv");
+          var openApp = function () {
+            openQuickView(handle, cfg, function () {
+              track(cfg.proxy, "add_to_cart", state.term, productId);
+            });
+          };
+          if (cfg.quickViewSource !== "theme") return openApp();
+          btn.disabled = true;
+          openThemeQuickView(handle, btn).then(function (opened) {
+            btn.disabled = false;
+            if (!opened) openApp();
           });
         });
       });
@@ -3522,6 +3639,7 @@
     cfg.scrollOnFilter = !!s.scrollOnFilter;
     cfg.facetColumns = s.facetColumns || 0;
     cfg.wishlistGrowth = !!s.wishlistGrowth;
+    cfg.quickViewSource = s.quickViewSource === "theme" ? "theme" : "app";
     if (s.filterSidebarWidth) document.documentElement.style.setProperty("--adsf-sidebar-w", s.filterSidebarWidth + "px");
     if (s.filterDrawerWidth) document.documentElement.style.setProperty("--adsf-drawer-w", s.filterDrawerWidth + "px");
     if (cfg.facetColumns) document.documentElement.style.setProperty("--adsf-facet-cols", String(cfg.facetColumns));

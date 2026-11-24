@@ -112,6 +112,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     collectionFilters: checkbox("collectionFilters"),
     showVendor: checkbox("showVendor"),
     cardAction: field("cardAction"),
+    quickViewSource: field("quickViewSource"),
     marketPricing: checkbox("marketPricing"),
     minChars: numeric("minChars"),
     maxSuggestions: numeric("maxSuggestions"),
@@ -535,6 +536,10 @@ export default function SettingsPage() {
               <s-option value="quick_add">Quick add to cart (current behaviour)</s-option>
               <s-option value="quick_view">Quick view</s-option>
               <s-option value="none">No button, link to the product</s-option>
+            </s-select>
+            <s-select name="quickViewSource" label="Quick view style" value={s.quickViewSource}>
+              <s-option value="app">This app’s quick view</s-option>
+              <s-option value="theme">My theme’s quick view when available (Dawn, Prestige 10.11)</s-option>
             </s-select>
             <Check
               name="marketPricing"
