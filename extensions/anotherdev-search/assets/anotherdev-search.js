@@ -1202,6 +1202,59 @@
      so prices and stock are the shopper's market's, and it adds through
      addToCartFromButton so every cart integration the cards support works here.
      ------------------------------------------------------------------------ */
+  /** Merchant custom CSS / JS from Settings > Customization. Runs once. */
+  var customInjected = false;
+  function injectCustomCode(s) {
+    if (customInjected) return;
+    customInjected = true;
+    if (s.customCss) {
+      var st = document.createElement("style");
+      st.setAttribute("data-adsf-custom", "");
+      st.textContent = s.customCss;
+      document.head.appendChild(st);
+    }
+    if (s.customJs) {
+      try {
+        // eslint-disable-next-line no-new-func
+        new Function(s.customJs)();
+      } catch (e) {
+        if (window.console) console.warn("[AnotherDev] custom JavaScript failed:", e);
+      }
+    }
+  }
+
+  /**
+   * Wishlist Growth: the app reads window.pageDataMap[handle] and binds its own
+   * click handler to .wishlist-btn-container. We render the container and feed
+   * the map; the wishlist app does the rest.
+   */
+  function wishlistReady(cfg) {
+    return !!(cfg.wishlistGrowth && typeof window.pageDataMap !== "undefined");
+  }
+  function wishlistButton(p) {
+    return '<div class="wishlist-btn-container adsf-wishlist" data-product-id="' + esc(p.handle) + '">' +
+      '<button type="button" class="wishlist-toggle-btn" aria-label="Add to wishlist">' +
+      '<svg class="wishlist-icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.67 5.47c-1.99-1.64-4.95-1.35-6.78.48L12 6.84l-.89-.89C9.29 4.13 6.32 3.83 4.33 5.47c-2.28 1.88-2.4 5.27-.36 7.31l7.67 7.67c.2.2.51.2.71 0l7.67-7.67c2.05-2.04 1.93-5.42-.35-7.31z"/></svg>' +
+      "</button></div>";
+  }
+  function wishlistFeed(hits) {
+    if (typeof window.pageDataMap === "undefined") return;
+    hits.forEach(function (p) {
+      window.pageDataMap[p.handle] = {
+        id: p.variantId || "",
+        title: "Default Title",
+        price: Math.round((p.priceMin || 0) * 100),
+        compare_at_price: null,
+        available: !!p.available,
+        product_id: p.productId,
+        product_handle: p.handle,
+        product_image: p.imageUrl,
+        product_title: p.title,
+      };
+    });
+    try { document.dispatchEvent(new CustomEvent("wishlist:refresh")); } catch (e) { /* old browser */ }
+  }
+
   var qvEl = null;
   var qvReturnFocus = null;
 
@@ -1701,6 +1754,7 @@
         });
         if (cfg.quickAdd) bindQuickAdd();
         if (cfg.cardAction === "quick_view") bindQuickView();
+        if (wishlistReady(cfg)) wishlistFeed(data.hits);
         applyMarketPricing(grid, cfg);
       }
       renderTopBanners(data.banners || []);
@@ -1715,6 +1769,7 @@
       var canQuickAdd = cfg.quickAdd && p.available && p.variantCount === 1 && p.variantId;
       var canQuickView = cfg.cardAction === "quick_view";
       return '<article class="adsf-card' + (p.pinned ? " adsf-card--pinned" : "") + '" data-adsf-mp="' + esc(p.handle) + '">' +
+        (wishlistReady(cfg) ? wishlistButton(p) : "") +
         '<a href="' + esc(shopUrl("products/" + p.handle)) + '" data-adsf-hit="' + esc(p.productId) + '">' +
         (p.imageUrl
           ? '<img class="adsf-card__img" src="' + esc(p.imageUrl) + '" alt="' + esc(p.imageAlt || p.title) + '" loading="lazy" width="300" height="300">'
@@ -1910,7 +1965,11 @@
       var startClosed = layout !== "inline";
 
       facets.forEach(function (f) {
-        var group = el("div", "adsf-facet");
+        // A facet with one value cannot narrow anything; hide it unless the
+        // merchant asked to keep it (or a value of it is already selected).
+        if (!cfg.showSingleValueFacets && f.displayAs !== "range" && f.values.length < 2 &&
+            !(state.filters[f.source] || []).length) return;
+        var group = el("div", "adsf-facet adsf-facet--" + (f.displayAs || "checkbox"));
         var heading = el("h4", "adsf-facet__title");
         var btn = el("button", "adsf-facet__toggle");
         btn.type = "button";
@@ -1932,6 +1991,8 @@
 
         if (f.displayAs === "range") {
           bodyWrap.appendChild(rangeFacet(f));
+        } else if (f.displayAs === "dropdown") {
+          bodyWrap.appendChild(dropdownFacet(f));
         } else {
           bodyWrap.appendChild(listFacet(f));
         }
@@ -2012,8 +2073,29 @@
       row.appendChild(min);
       row.appendChild(el("span", "adsf-facet__dash", "–"));
       row.appendChild(max);
-      wrap.appendChild(row);
-      if (hi > lo) wrap.appendChild(slider);
+      var style = cfg.priceFilterStyle || "both";
+      if (style !== "slider" || hi <= lo) wrap.appendChild(row);
+      if (hi > lo && style !== "inputs") wrap.appendChild(slider);
+      return wrap;
+    }
+
+    /** One select per facet: compact, single choice. */
+    function dropdownFacet(f) {
+      var wrap = el("div", "adsf-facet__values");
+      var sel = el("select", "adsf-facet__select");
+      sel.setAttribute("aria-label", f.label);
+      var current = (state.filters[f.source] || [])[0] || "";
+      sel.innerHTML = '<option value="">All</option>' + f.values.map(function (v) {
+        return '<option value="' + esc(v.value) + '"' + (v.value === current ? " selected" : "") + ">" +
+          esc(v.label) + (cfg.showFacetCounts === false ? "" : " (" + v.count + ")") + "</option>";
+      }).join("");
+      sel.addEventListener("change", function () {
+        if (sel.value) state.filters[f.source] = [sel.value];
+        else delete state.filters[f.source];
+        state.page = 1;
+        apply(true);
+      });
+      wrap.appendChild(sel);
       return wrap;
     }
 
@@ -2038,7 +2120,8 @@
       });
 
       ordered.forEach(function (v, index) {
-        var li = el("li", "adsf-facet__item" + (f.displayAs === "swatch" ? " adsf-facet__item--swatch" : ""));
+        var li = el("li", "adsf-facet__item" + (f.displayAs === "swatch" ? " adsf-facet__item--swatch" : "") +
+          (f.displayAs === "button" ? " adsf-facet__item--button" : ""));
         // Unique per row, not derived from the value.
         //
         // Stripping non-alphanumerics collapsed "Red" and "Red!" (and "X L" and
@@ -2160,7 +2243,13 @@
       apply(true);
     }
 
-    function apply(push) { syncUrl(push); fetchResults(); }
+    function apply(push) {
+      syncUrl(push);
+      fetchResults();
+      if (cfg.scrollOnFilter && grid && grid.getBoundingClientRect().top < 0) {
+        try { grid.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) { grid.scrollIntoView(); }
+      }
+    }
 
     // --- mobile drawer, with a focus trap ---------------------------------
     var lastFocused = null;
@@ -3428,6 +3517,15 @@
     cfg.quickAdd = !!s.quickAdd;
     cfg.cardAction = s.cardAction || (s.quickAdd ? "quick_add" : "none");
     cfg.marketPricing = !!s.marketPricing;
+    cfg.priceFilterStyle = s.priceFilterStyle || "both";
+    cfg.showSingleValueFacets = s.showSingleValueFacets !== false;
+    cfg.scrollOnFilter = !!s.scrollOnFilter;
+    cfg.facetColumns = s.facetColumns || 0;
+    cfg.wishlistGrowth = !!s.wishlistGrowth;
+    if (s.filterSidebarWidth) document.documentElement.style.setProperty("--adsf-sidebar-w", s.filterSidebarWidth + "px");
+    if (s.filterDrawerWidth) document.documentElement.style.setProperty("--adsf-drawer-w", s.filterDrawerWidth + "px");
+    if (cfg.facetColumns) document.documentElement.style.setProperty("--adsf-facet-cols", String(cfg.facetColumns));
+    injectCustomCode(s);
     cfg.swatches = s.swatches || {};
     cfg.presets = Array.isArray(s.presets) ? s.presets : [];
     cfg.voiceSearch = s.voiceSearch !== false;

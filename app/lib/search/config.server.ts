@@ -43,7 +43,7 @@ export interface FilterPresetLite {
 export interface FilterConfigLite {
   source: string;
   label: string;
-  displayAs: "checkbox" | "range" | "swatch" | "list";
+  displayAs: "checkbox" | "range" | "swatch" | "list" | "button" | "dropdown";
   position: number;
   enabled: boolean;
 }

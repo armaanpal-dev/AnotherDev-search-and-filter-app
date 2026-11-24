@@ -41,6 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     includeUnavailable: settings.showOutOfStock,
     typoTolerance: settings.typoTolerance,
     semantic: settings.semanticSearch,
+    variantAvailability: settings.variantAvailabilityFilter,
     bucket,
   });
 

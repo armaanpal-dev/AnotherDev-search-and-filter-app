@@ -34,6 +34,8 @@ export interface SearchQuery {
   facetsOnly?: boolean;
   // Include out-of-stock products in results
   includeUnavailable?: boolean;
+  // Option filters require the MATCHING variant to be in stock.
+  variantAvailability?: boolean;
   // Merchant toggle: when false, fuzzy/trigram matching is skipped (exact only).
   typoTolerance?: boolean;
   // Merchant toggle: blend pgvector similarity into ranking (Pro + configured).
@@ -81,7 +83,7 @@ export interface FacetValue {
 export interface Facet {
   source: string;
   label: string;
-  displayAs: "checkbox" | "range" | "swatch" | "list";
+  displayAs: "checkbox" | "range" | "swatch" | "list" | "button" | "dropdown";
   values: FacetValue[];
   // for range facets
   min?: number;

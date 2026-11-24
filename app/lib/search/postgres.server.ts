@@ -127,6 +127,7 @@ function buildFilterPredicates(
   filters: FilterSelection,
   price?: { min?: number; max?: number },
   collection?: string,
+  variantAvailability?: boolean,
 ): Map<string, Prisma.Sql> {
   const preds = new Map<string, Prisma.Sql>();
 
@@ -151,9 +152,14 @@ function buildFilterPredicates(
     } else if (source.startsWith("option:")) {
       const opt = source.slice("option:".length);
       // options is { "Color": ["Red","Blue"] }; ?| tests any selected value present.
+      // With variantAvailability, "Size M" means "has an in-stock M", so a
+      // product whose only M is sold out no longer matches.
       preds.set(
         source,
-        Prisma.sql`(p."options" -> ${opt}) ?| ARRAY[${Prisma.join(values)}]::text[]`,
+        variantAvailability
+          ? Prisma.sql`EXISTS (SELECT 1 FROM "ProductVariant" v WHERE v."productId" = p."id"
+              AND v."available" = TRUE AND (v."optionValues" ->> ${opt}) IN (${Prisma.join(values)}))`
+          : Prisma.sql`(p."options" -> ${opt}) ?| ARRAY[${Prisma.join(values)}]::text[]`,
       );
     } else if (source.startsWith("metafield:")) {
       const key = source.slice("metafield:".length);
@@ -463,6 +469,7 @@ export class PostgresSearchEngine implements SearchEngine {
       expandMergedSelection(q.filters, cfg.merges),
       q.price,
       q.collection,
+      q.variantAvailability,
     );
     const whereOrganic = combine([
       ...base,

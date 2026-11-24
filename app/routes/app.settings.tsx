@@ -120,6 +120,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     gridColumnsMobile: numeric("gridColumnsMobile"),
     fontSize: numeric("fontSize"),
     filterLayout: field("filterLayout"),
+    filterSidebarWidth: numeric("filterSidebarWidth"),
+    filterDrawerWidth: numeric("filterDrawerWidth"),
+    priceFilterStyle: field("priceFilterStyle"),
+    showSingleValueFacets: checkbox("showSingleValueFacets"),
+    scrollOnFilter: checkbox("scrollOnFilter"),
+    facetColumns: numeric("facetColumns"),
+    variantAvailabilityFilter: checkbox("variantAvailabilityFilter"),
+    wishlistGrowth: checkbox("wishlistGrowth"),
+    // Text areas: an empty box is a deliberate "clear", so read them raw.
+    customCss: present("customCss") ? String(f.get("customCss") ?? "") : undefined,
+    customJs: present("customJs") ? String(f.get("customJs") ?? "") : undefined,
     productCards: field("productCards"),
     collectionWidthEnabled: checkbox("collectionWidthEnabled"),
     collectionMaxWidth: numeric("collectionMaxWidth"),
@@ -857,6 +868,34 @@ export default function SettingsPage() {
         </Panel>
 
         <Panel show={tab === "filters"}>
+        <s-section heading="Filter behaviour">
+          <s-stack direction="block" gap="base">
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <s-number-field name="filterSidebarWidth" label="Sidebar width (px)" min={160} max={420} defaultValue={String(s.filterSidebarWidth)} />
+              <s-number-field name="filterDrawerWidth" label="Drawer width on mobile (px)" min={260} max={560} defaultValue={String(s.filterDrawerWidth)} />
+            </s-grid>
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <s-select name="priceFilterStyle" label="Price filter" value={s.priceFilterStyle}>
+                <s-option value="both">Slider and min/max boxes</s-option>
+                <s-option value="slider">Slider only</s-option>
+                <s-option value="inputs">Min/max boxes only</s-option>
+              </s-select>
+              <s-number-field name="facetColumns" label="Options per row" min={0} max={6} defaultValue={String(s.facetColumns)} details="0 = one per line. Useful for sizes." />
+            </s-grid>
+            <Check name="showSingleValueFacets" checked={s.showSingleValueFacets} label="Show a filter even when it has only one option" />
+            <Check name="scrollOnFilter" checked={s.scrollOnFilter} label="Scroll back to the top of the products when a filter changes" />
+            <Check
+              name="variantAvailabilityFilter"
+              checked={s.variantAvailabilityFilter}
+              label="When a size or colour is selected, only show products where that variant is in stock"
+            />
+            <s-text color="subdued">
+              Active filters always show as removable chips above the products, and a
+              shopper’s chosen sort always wins over pinned products.
+            </s-text>
+          </s-stack>
+        </s-section>
+
         <s-section heading="Colour swatches">
           <s-paragraph>
             <s-text color="subdued">
@@ -876,6 +915,41 @@ export default function SettingsPage() {
         </Panel>
 
         <Panel show={tab === "advanced"}>
+        <s-section heading="Integrations">
+          <s-stack direction="block" gap="base">
+            <Check
+              name="wishlistGrowth"
+              checked={s.wishlistGrowth}
+              label="Wishlist Growth: show its heart button on result cards"
+            />
+            <s-text color="subdued">
+              Needs the <s-link href="https://apps.shopify.com/wishlist-growth-new" target="_blank">Wishlist Growth</s-link> app
+              installed and its embed enabled. The button appears only where that app is running.
+            </s-text>
+          </s-stack>
+        </s-section>
+
+        <s-section heading="Custom code">
+          <s-stack direction="block" gap="base">
+            <input type="hidden" name="_present.customCss" value="1" />
+            <input type="hidden" name="_present.customJs" value="1" />
+            <s-text-area
+              name="customCss"
+              label="Custom CSS"
+              rows={6}
+              defaultValue={s.customCss}
+              placeholder={".adsf-card__title { text-transform: uppercase; }"}
+            />
+            <s-text-area
+              name="customJs"
+              label="Custom JavaScript"
+              rows={6}
+              defaultValue={s.customJs}
+              details="Runs once on every storefront page after the app loads. A mistake here can break your storefront, so test on a preview theme first."
+            />
+          </s-stack>
+        </s-section>
+
         <s-section heading="Keeping the index current">
           <s-stack direction="block" gap="base">
             <Check

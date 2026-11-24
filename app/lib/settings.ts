@@ -147,6 +147,29 @@ export interface WidgetSettings {
   emptySearchProductIds: string[];
   /** Show prices/availability for the shopper's country (Shopify Markets). */
   marketPricing: boolean;
+  // ---- Filter display (ported from the source app's filter settings) ----
+  filterSidebarWidth: number;   // px, sidebar layout
+  filterDrawerWidth: number;    // px, drawer / mobile off-canvas
+  priceFilterStyle: "both" | "slider" | "inputs";
+  /** Show a facet even when it has a single value. */
+  showSingleValueFacets: boolean;
+  /** Scroll back to the top of the results when a filter changes. */
+  scrollOnFilter: boolean;
+  /** Fixed number of values per row in list/swatch facets; 0 = one per line. */
+  facetColumns: number;
+  /**
+   * When an option filter (Size M) is selected, only match products whose
+   * matching variant is in stock, not products that merely have the option.
+   */
+  variantAvailabilityFilter: boolean;
+  // ---- Customization ----
+  /** Merchant CSS appended to the storefront (bounded, cannot close the tag). */
+  customCss: string;
+  /** Merchant JavaScript run after the widget loads. */
+  customJs: string;
+  // ---- Integrations ----
+  /** Wishlist Growth heart button on result cards. */
+  wishlistGrowth: boolean;
   // Appearance
   accentColor: string;
   backgroundColor: string;
@@ -220,6 +243,16 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   cardAction: "none",
   emptySearchProductIds: [],
   marketPricing: false,
+  filterSidebarWidth: 240,
+  filterDrawerWidth: 340,
+  priceFilterStyle: "both",
+  showSingleValueFacets: true,
+  scrollOnFilter: false,
+  facetColumns: 0,
+  variantAvailabilityFilter: false,
+  customCss: "",
+  customJs: "",
+  wishlistGrowth: false,
   accentColor: "#111111",
   backgroundColor: "#ffffff",
   textColor: "#1a1a1a",
@@ -297,6 +330,16 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     ...cardActionFields(s),
     emptySearchProductIds: idList(s.emptySearchProductIds, 24),
     marketPricing: bool(s.marketPricing, DEFAULT_SETTINGS.marketPricing),
+    filterSidebarWidth: num(s.filterSidebarWidth, DEFAULT_SETTINGS.filterSidebarWidth, 160, 420),
+    filterDrawerWidth: num(s.filterDrawerWidth, DEFAULT_SETTINGS.filterDrawerWidth, 260, 560),
+    priceFilterStyle: oneOf(s.priceFilterStyle, ["both", "slider", "inputs"], DEFAULT_SETTINGS.priceFilterStyle),
+    showSingleValueFacets: bool(s.showSingleValueFacets, DEFAULT_SETTINGS.showSingleValueFacets),
+    scrollOnFilter: bool(s.scrollOnFilter, DEFAULT_SETTINGS.scrollOnFilter),
+    facetColumns: num(s.facetColumns, DEFAULT_SETTINGS.facetColumns, 0, 6),
+    variantAvailabilityFilter: bool(s.variantAvailabilityFilter, DEFAULT_SETTINGS.variantAvailabilityFilter),
+    customCss: code(s.customCss, 20000).replace(/<\/?style/gi, ""),
+    customJs: code(s.customJs, 20000).replace(/<\/script/gi, ""),
+    wishlistGrowth: bool(s.wishlistGrowth, DEFAULT_SETTINGS.wishlistGrowth),
     accentColor: color(s.accentColor, DEFAULT_SETTINGS.accentColor),
     backgroundColor: color(s.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
     textColor: color(s.textColor, DEFAULT_SETTINGS.textColor),
@@ -338,6 +381,9 @@ function idList(v: unknown, max: number): string[] {
   if (!Array.isArray(v)) return [];
   return [...new Set(v.map((x) => String(x).trim()).filter((x) => /^\d{1,20}$/.test(x)))].slice(0, max);
 }
+
+/** Merchant-authored code: a string, bounded in size. */
+const code = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
 
 export const WEIGHTS = ["300", "400", "500", "600", "700"] as const;
 
