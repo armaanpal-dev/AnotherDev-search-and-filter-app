@@ -186,3 +186,25 @@ test("embedEnabled reads settings_data.json", () => {
   assert.equal(theme.embedEnabled("not json"), null);
   assert.equal(theme.embedEnabled(""), null);
 });
+
+/* --------------------------------------------------------- catalog health */
+const health = await bundleModule("../app/lib/catalog-health", "health");
+test("compareCatalog flags counts, collection shortfalls, missing and stale products", () => {
+  const now = Date.parse("2026-11-24T12:00:00Z");
+  const issues = health.compareCatalog({
+    shopifyActive: 100, indexedActive: 98,
+    collections: [
+      { handle: "a", title: "A", shopify: 50, indexed: 40 },
+      { handle: "b", title: "B", shopify: 50, indexed: 50 },
+      { handle: "c", title: "C", shopify: 10, indexed: 12 },
+    ],
+    recent: [
+      { productId: "1", title: "New", shopifyUpdatedAt: "2026-11-24T10:00:00Z", indexedUpdatedAt: null },
+      { productId: "2", title: "Old", shopifyUpdatedAt: "2026-11-24T10:00:00Z", indexedUpdatedAt: "2026-11-23T10:00:00Z" },
+      { productId: "3", title: "Fresh", shopifyUpdatedAt: "2026-11-24T11:55:00Z", indexedUpdatedAt: "2026-11-23T10:00:00Z" },
+      { productId: "4", title: "Same", shopifyUpdatedAt: "2026-11-24T10:00:00Z", indexedUpdatedAt: "2026-11-24T10:00:00Z" },
+    ],
+  }, now);
+  assert.deepEqual(issues.map((i) => i.kind), ["count", "collection", "missing", "stale"]);
+  assert.match(issues[0].message, /2 missing/);
+});
