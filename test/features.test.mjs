@@ -175,3 +175,14 @@ test("cardAction derives from legacy quickAdd and keeps quickAdd in step", () =>
 test("emptySearchProductIds keeps numeric ids only", () => {
   assert.deepEqual(settingsMod.resolveSettings({ emptySearchProductIds: ["1", "1", "x", 22] }).emptySearchProductIds, ["1", "22"]);
 });
+
+/* ------------------------------------------------------------ theme setup */
+const theme = await bundleModule("../app/lib/theme", "theme");
+test("embedEnabled reads settings_data.json", () => {
+  const t = `shopify://apps/anotherdev/blocks/app-embed/${theme.EXTENSION_UID}`;
+  assert.equal(theme.embedEnabled(`/* c */ {"current":{"blocks":{"1":{"type":"${t}","disabled":false}}}}`), true);
+  assert.equal(theme.embedEnabled(`{"current":{"blocks":{"1":{"type":"${t}","disabled":true}}}}`), false);
+  assert.equal(theme.embedEnabled(`{"current":{"blocks":{}}}`), false);
+  assert.equal(theme.embedEnabled("not json"), null);
+  assert.equal(theme.embedEnabled(""), null);
+});
