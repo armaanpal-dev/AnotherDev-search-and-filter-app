@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
-import { getAnalytics } from "../lib/analytics.server";
+import { getAnalytics, getExtraReports } from "../lib/analytics.server";
 import { getPixelState } from "../lib/pixel.server";
 import { Stat, Row, Bar, Empty, Card, TILES, WIDE } from "../components/ui";
 
@@ -24,7 +24,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? Math.min(requested, limits.analyticsDays)
       : limits.analyticsDays;
 
-  const summary = await getAnalytics(shop.id, windowDays);
+  const [summary, extra] = await Promise.all([
+    getAnalytics(shop.id, windowDays),
+    getExtraReports(shop.id, windowDays),
+  ]);
 
   // Purchase numbers are only meaningful once the pixel is live; without it the
   // revenue tiles would read as "search earns nothing" rather than "not measured
@@ -34,7 +37,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // threaded through every metric tile.
   const { state: pixel } = await getPixelState(admin);
 
-  return { ...summary, plan, maxDays: limits.analyticsDays, pixel };
+  return { ...summary, extra, plan, maxDays: limits.analyticsDays, pixel };
 };
 
 // Below this many searches a percentage is noise. Two searches, one of which
@@ -43,6 +46,11 @@ const MIN_SAMPLE = 20;
 
 /** The ranges offered, capped to what the plan actually retains. */
 const RANGES = [7, 30, 90, 365];
+
+/** Three-hour blocks keep the hour-of-day chart readable. */
+const HOUR_BLOCKS = [0, 3, 6, 9, 12, 15, 18, 21];
+const block = (hours: number[], start: number) =>
+  hours.slice(start, start + 3).reduce((a, b) => a + b, 0);
 
 export default function AnalyticsPage() {
   const d = useLoaderData<typeof loader>();
@@ -322,6 +330,57 @@ export default function AnalyticsPage() {
         ) : (
           <Empty heading="No clicks recorded yet" />
         )}
+      </s-section>
+
+      <s-section heading="Most used filters">
+        {d.extra.filters.length ? (
+          <s-stack direction="block" gap="small-500">
+            {d.extra.filters.map((f) => (
+              <Bar
+                key={f.source + f.value}
+                label={`${f.source.replace(/^(option|metafield):/, "")}: ${f.value}`}
+                value={f.count}
+                max={Math.max(1, d.extra.filters[0].count)}
+              />
+            ))}
+          </s-stack>
+        ) : (
+          <Empty heading="No filters used yet" />
+        )}
+      </s-section>
+
+      <s-section heading="Searches by country">
+        {d.extra.countries.length ? (
+          <s-stack direction="block" gap="small-500">
+            {d.extra.countries.map((c) => (
+              <Bar key={c.country} label={c.country} value={c.searches} max={Math.max(1, d.extra.countries[0].searches)} />
+            ))}
+          </s-stack>
+        ) : (
+          <Empty heading="No country data yet">Recorded from searches made after this update.</Empty>
+        )}
+      </s-section>
+
+      <s-section heading="When shoppers search (UTC)">
+        <s-grid gridTemplateColumns="1fr 1fr" gap="large-100">
+          <s-stack direction="block" gap="small-500">
+            <s-text type="strong">Day of week</s-text>
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((name, i) => (
+              <Bar key={name} label={name} value={d.extra.dayOfWeek[i]} max={Math.max(1, ...d.extra.dayOfWeek)} />
+            ))}
+          </s-stack>
+          <s-stack direction="block" gap="small-500">
+            <s-text type="strong">Hour of day</s-text>
+            {HOUR_BLOCKS.map((h) => (
+              <Bar
+                key={h}
+                label={`${String(h).padStart(2, "0")}:00–${String(h + 3).padStart(2, "0")}:00`}
+                value={block(d.extra.hourOfDay, h)}
+                max={Math.max(1, ...HOUR_BLOCKS.map((x) => block(d.extra.hourOfDay, x)))}
+              />
+            ))}
+          </s-stack>
+        </s-grid>
       </s-section>
 
       <s-section slot="aside" heading="What these measure">

@@ -94,6 +94,7 @@ model Shop {
   sizeMappings  SizeMapping[]
   mergedValues  MergedValue[]
   filterGroups  FilterGroup[]
+  filterUsage   FilterUsage[]
 
   updatedAt    DateTime @updatedAt
 }
@@ -330,6 +331,8 @@ model SearchEvent {
   // A/B bucket this shopper was in, so Analytics can compare two rule sets.
   bucket        String?
   sessionToken  String?  // anonymous storefront session for CTR/CVR joins
+  // Shopper's country (Shopify.country), for the Locations report.
+  country       String?
   createdAt     DateTime @default(now())
 
   @@index([shopId, createdAt])
@@ -445,4 +448,19 @@ model FilterGroup {
   createdAt   DateTime @default(now())
 
   @@index([shopId, active])
+}
+
+// Daily count of filter values shoppers applied (the Filters report).
+// Pre-aggregated so recording a refinement is one upsert, not one row.
+model FilterUsage {
+  id     String   @id @default(cuid())
+  shopId String
+  shop   Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  day    DateTime @db.Date
+  source String
+  value  String
+  count  Int      @default(0)
+
+  @@unique([shopId, day, source, value])
+  @@index([shopId, day])
 }

@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { normalizeQuery } from "./search/normalize";
 
@@ -38,6 +39,7 @@ export async function pruneAnalytics(shopId: string): Promise<number> {
   const { count } = await prisma.searchEvent.deleteMany({
     where: { shopId, createdAt: { lt: cutoff } },
   });
+  await prisma.filterUsage.deleteMany({ where: { shopId, day: { lt: cutoff } } });
 
   const tokenCutoff = new Date(
     Date.now() - SESSION_TOKEN_RETENTION_HOURS * 60 * 60 * 1000,
@@ -71,6 +73,7 @@ export async function recordSearchEvent(input: {
   resultsCount: number;
   sessionToken?: string;
   bucket?: string;
+  country?: string;
 }): Promise<void> {
   try {
     const normalized = normalizeQuery(input.term);
@@ -102,6 +105,7 @@ export async function recordSearchEvent(input: {
         resultsCount: input.resultsCount,
         sessionToken: input.sessionToken,
         bucket: input.bucket,
+        country: /^[A-Z]{2}$/.test(input.country ?? "") ? input.country : null,
       },
     });
   } catch {
@@ -611,4 +615,71 @@ function closestWord(term: string, title: string): string {
   // Below this the "suggestion" is a different word that happens to share a few
   // letters, which is worse than offering nothing.
   return bestScore > 0.3 ? best : "";
+}
+
+/**
+ * Count the filter values a shopper applied. One upsert per value per day, so
+ * a busy store does not grow a row per refinement. Never throws.
+ */
+export async function recordFilterUsage(
+  shopId: string,
+  filters: Record<string, string[]>,
+): Promise<void> {
+  try {
+    const day = new Date(new Date().toISOString().slice(0, 10));
+    const pairs = Object.entries(filters)
+      .flatMap(([source, values]) =>
+        values.map((value) => ({ source: source.slice(0, 80), value: value.slice(0, 120) })),
+      )
+      .slice(0, 20);
+    for (const { source, value } of pairs) {
+      await prisma.filterUsage.upsert({
+        where: { shopId_day_source_value: { shopId, day, source, value } },
+        create: { shopId, day, source, value, count: 1 },
+        update: { count: { increment: 1 } },
+      });
+    }
+  } catch {
+    // Analytics must never break search.
+  }
+}
+
+export interface ExtraReports {
+  filters: { source: string; value: string; count: number }[];
+  countries: { country: string; searches: number }[];
+  /** 24 buckets (UTC). */
+  hourOfDay: number[];
+  /** 7 buckets, Sunday first (UTC). */
+  dayOfWeek: number[];
+}
+
+/** The source app's Filters, Locations and time-of-day reports. */
+export async function getExtraReports(shopId: string, windowDays: number): Promise<ExtraReports> {
+  const since = new Date(Date.now() - windowDays * 86_400_000);
+  const [filters, countries, hours, days] = await Promise.all([
+    prisma.$queryRaw<{ source: string; value: string; count: bigint }[]>(Prisma.sql`
+      SELECT "source", "value", SUM("count")::bigint AS count FROM "FilterUsage"
+      WHERE "shopId" = ${shopId} AND "day" >= ${since}::date
+      GROUP BY 1, 2 ORDER BY count DESC LIMIT 20`),
+    prisma.$queryRaw<{ country: string; searches: bigint }[]>(Prisma.sql`
+      SELECT "country", COUNT(*)::bigint AS searches FROM "SearchEvent"
+      WHERE "shopId" = ${shopId} AND "createdAt" >= ${since} AND "country" IS NOT NULL
+      GROUP BY 1 ORDER BY searches DESC LIMIT 20`),
+    prisma.$queryRaw<{ h: number; c: bigint }[]>(Prisma.sql`
+      SELECT EXTRACT(HOUR FROM "createdAt")::int AS h, COUNT(*)::bigint AS c FROM "SearchEvent"
+      WHERE "shopId" = ${shopId} AND "createdAt" >= ${since} GROUP BY 1`),
+    prisma.$queryRaw<{ d: number; c: bigint }[]>(Prisma.sql`
+      SELECT EXTRACT(DOW FROM "createdAt")::int AS d, COUNT(*)::bigint AS c FROM "SearchEvent"
+      WHERE "shopId" = ${shopId} AND "createdAt" >= ${since} GROUP BY 1`),
+  ]);
+  const hourOfDay: number[] = Array(24).fill(0);
+  hours.forEach((r) => (hourOfDay[Number(r.h)] = Number(r.c)));
+  const dayOfWeek: number[] = Array(7).fill(0);
+  days.forEach((r) => (dayOfWeek[Number(r.d)] = Number(r.c)));
+  return {
+    filters: filters.map((r) => ({ source: r.source, value: r.value, count: Number(r.count) })),
+    countries: countries.map((r) => ({ country: r.country, searches: Number(r.searches) })),
+    hourOfDay,
+    dayOfWeek,
+  };
 }

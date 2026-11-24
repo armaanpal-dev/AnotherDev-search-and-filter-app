@@ -1651,6 +1651,7 @@
       sp.set("perPage", perPage);
       if (collection) sp.set("collection", collection);
       sp.set("st", sessionToken);
+      if (window.Shopify && window.Shopify.country) sp.set("country", window.Shopify.country);
       request(cfg.proxy + "/search?" + sp.toString())
         .then(function (data) {
           if (!data) return;
