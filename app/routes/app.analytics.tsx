@@ -111,7 +111,7 @@ export default function AnalyticsPage() {
             <s-paragraph>
               Checkout runs on Shopify&rsquo;s own domain, so measuring which searches
               lead to orders needs a small pixel. Turn it on in{" "}
-              <s-link href="/app/settings">Settings</s-link> and this page starts
+              <s-link href="/app/settings/general">Settings</s-link> and this page starts
               reporting search-driven revenue.
             </s-paragraph>
           </s-banner>

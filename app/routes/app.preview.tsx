@@ -122,6 +122,7 @@ export default function PreviewPage() {
 
   return (
     <s-page heading="Test search">
+      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
       <s-section heading="Try a search">
         {/* A plain GET form: the query lives in the URL, so a merchant can
             bookmark a problem case or paste it to someone else. */}
@@ -198,7 +199,7 @@ export default function PreviewPage() {
                 value={strategyLabel(r.strategy)}
                 hint={strategyHint(r.strategy)}
               />
-              <Stat label="Filters offered" value={String(r.facets.length)} href="/app/filters" />
+              <Stat label="Filters offered" value={String(r.facets.length)} href="/app/filters/manage" />
             </s-grid>
 
             {r.explain && (

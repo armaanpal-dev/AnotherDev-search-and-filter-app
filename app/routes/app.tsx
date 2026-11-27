@@ -34,18 +34,14 @@ export default function App() {
 
   return (
     <AppProvider embedded apiKey={apiKey}>
+      {/* Six sections, like the reference app: each section's landing page
+          lists its tools, so the nav stays short as features grow. */}
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
-        <s-link href="/app/sync">Index</s-link>
-        <s-link href="/app/preview">Test search</s-link>
         <s-link href="/app/filters">Filters</s-link>
-        <s-link href="/app/filter-tools">Filter tools</s-link>
-        <s-link href="/app/synonyms">Synonyms</s-link>
-        <s-link href="/app/search-tools">Search tools</s-link>
-        <s-link href="/app/merchandising">Merchandising</s-link>
+        <s-link href="/app/search">Search</s-link>
         <s-link href="/app/analytics">Analytics</s-link>
-        <s-link href="/app/plans">Plans</s-link>
-        <s-link href="/app/theme-setup">Theme setup</s-link>
+        <s-link href="/app/collections">Collections</s-link>
         <s-link href="/app/settings">Settings</s-link>
       </s-app-nav>
       <Outlet />

@@ -204,3 +204,65 @@ export function useSaveToast(
     }
   }, [fetcher.state, fetcher.data, message]);
 }
+
+/** One destination on a section hub page. */
+export interface HubItem {
+  href: string;
+  title: string;
+  blurb: string;
+  /** Polaris icon type. */
+  icon: string;
+  badge?: string;
+}
+
+/**
+ * A section landing page (Filters, Search, Collections, Settings): a short
+ * intro and a two-column grid of cards, each leading to one page. Same
+ * clickable-card look as the dashboard's page map, so the app reads as one.
+ */
+export function Hub({
+  heading,
+  intro,
+  items,
+  aside,
+}: {
+  heading: string;
+  intro: string;
+  items: HubItem[];
+  aside?: ReactNode;
+}) {
+  return (
+    <s-page heading={heading}>
+      <s-section>
+        <s-stack direction="block" gap="base">
+          <s-text color="subdued">{intro}</s-text>
+          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(300px, 1fr))" gap="base">
+            {items.map((item) => (
+              <s-clickable
+                key={item.href + item.title}
+                href={item.href}
+                padding="base"
+                background="subdued"
+                borderRadius="base"
+              >
+                <s-grid gridTemplateColumns="auto 1fr" gap="base" alignItems="start">
+                  <s-box padding="small-300" background="strong" borderRadius="base">
+                    <s-icon type={item.icon as any} />
+                  </s-box>
+                  <s-stack direction="block" gap="small-500">
+                    <s-stack direction="inline" gap="small-500" alignItems="center">
+                      <s-text type="strong">{item.title}</s-text>
+                      {item.badge && <s-badge tone="info">{item.badge}</s-badge>}
+                    </s-stack>
+                    <s-text color="subdued">{item.blurb}</s-text>
+                  </s-stack>
+                </s-grid>
+              </s-clickable>
+            ))}
+          </s-grid>
+        </s-stack>
+      </s-section>
+      {aside}
+    </s-page>
+  );
+}

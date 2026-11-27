@@ -85,6 +85,7 @@ export default function SyncPage() {
 
   return (
     <s-page heading="Search index">
+      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/settings">Settings</s-link>
       <s-button
         slot="primary-action"
         variant="primary"
@@ -173,7 +174,7 @@ export default function SyncPage() {
         <s-paragraph>
           <s-text color="subdued">
             Once products are indexed, tune relevance in{" "}
-            <s-link href="/app/filters">Filters</s-link> and{" "}
+            <s-link href="/app/filters/manage">Filters</s-link> and{" "}
             <s-link href="/app/synonyms">Synonyms</s-link>, then check{" "}
             <s-link href="/app/analytics">Analytics</s-link> for searches that
             returned nothing.

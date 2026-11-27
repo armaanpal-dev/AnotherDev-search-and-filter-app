@@ -252,6 +252,7 @@ export default function MerchandisingPage() {
   if (!isPro) {
     return (
       <s-page heading="Merchandising">
+        <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
         <s-banner tone="info" heading="Merchandising is on the paid plans">
           <s-paragraph>
             Pin products to the top of results, boost or bury by relevance, hide products,
@@ -275,6 +276,7 @@ export default function MerchandisingPage() {
   return (
     <ProductInfoContext.Provider value={productInfo}>
     <s-page heading="Merchandising">
+      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
       {experimentRunning && (
         <s-banner tone="info" heading="An A/B test is running">

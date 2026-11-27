@@ -171,6 +171,7 @@ export default function SearchToolsPage() {
 
   return (
     <s-page heading="Search tools">
+      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
 
       <s-section heading="Search banners">

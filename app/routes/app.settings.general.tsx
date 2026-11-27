@@ -5,7 +5,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
+import { useLoaderData, useFetcher, useSearchParams } from "react-router";
 import { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -399,7 +399,12 @@ export default function SettingsPage() {
      so edits made on one tab would be silently lost by a save made on
      another. The cost is a slightly larger DOM, which is nothing next to
      losing a merchant’s work. */
-  const [tab, setTab] = useState<TabKey>("search");
+  // ?tab=filters|cards|advanced opens that tab, so hub cards can link straight to it.
+  const [params] = useSearchParams();
+  const initialTab = params.get("tab");
+  const [tab, setTab] = useState<TabKey>(
+    TABS.some((t) => t.key === initialTab) ? (initialTab as TabKey) : "search",
+  );
 
   const error =
     (fetcher.data && "error" in fetcher.data && fetcher.data.error) ||
@@ -450,6 +455,7 @@ export default function SettingsPage() {
 
   return (
     <s-page heading="Settings">
+      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/settings">Settings</s-link>
       <s-button
         slot="primary-action"
         variant="primary"

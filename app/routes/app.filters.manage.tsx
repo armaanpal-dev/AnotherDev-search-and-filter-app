@@ -210,6 +210,7 @@ export default function FiltersPage() {
 
   return (
     <s-page heading="Filters">
+      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/filters">Filters</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
 
       <s-section heading="Overview">
@@ -410,7 +411,7 @@ export default function FiltersPage() {
         <s-paragraph>
           <s-text color="subdued">
             Swatch facets read their colours from{" "}
-            <s-link href="/app/settings">Settings</s-link>. Anything not mapped
+            <s-link href="/app/settings/general">Settings</s-link>. Anything not mapped
             there falls back to a built-in list of common colour names.
           </s-text>
         </s-paragraph>

@@ -171,14 +171,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // badging it "Pro" told Growth merchants they could not use what they had paid
 // for.
 const PAGES: { href: string; title: string; blurb: string; badge?: string }[] = [
-  { href: "/app/sync", title: "Index", blurb: "Pull your catalog into the search engine." },
-  { href: "/app/preview", title: "Test search", blurb: "See what shoppers get, and why it ranks that way." },
-  { href: "/app/filters", title: "Filters", blurb: "Choose the filters shoppers see." },
-  { href: "/app/synonyms", title: "Synonyms", blurb: "Teach search that words mean the same thing." },
-  { href: "/app/merchandising", title: "Merchandising", blurb: "Pin, boost, bury, hide, redirect.", badge: "Growth" },
-  { href: "/app/analytics", title: "Analytics", blurb: "Top terms, dead ends, revenue." },
+  { href: "/app/filters", title: "Filters", blurb: "Which filters shoppers see, groups per collection, merged values." },
+  { href: "/app/search", title: "Search", blurb: "Banners, synonyms, redirects, blocked suggestions, test search." },
+  { href: "/app/collections", title: "Collections", blurb: "Pin, boost and bury products on collection pages.", badge: "Growth" },
+  { href: "/app/analytics", title: "Analytics", blurb: "Top terms, dead ends, filters used, revenue." },
+  { href: "/app/settings", title: "Settings", blurb: "Theme setup, index, look and behaviour, integrations." },
   { href: "/app/plans", title: "Plans", blurb: "Free to 100 products. Pro for the rest." },
-  { href: "/app/settings", title: "Settings", blurb: "Behaviour, layout, colours, swatches." },
 ];
 
 export default function Dashboard() {
