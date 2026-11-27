@@ -208,3 +208,20 @@ test("compareCatalog flags counts, collection shortfalls, missing and stale prod
   assert.deepEqual(issues.map((i) => i.kind), ["count", "collection", "missing", "stale"]);
   assert.match(issues[0].message, /2 missing/);
 });
+
+/* ------------------------------------------------------------ breadcrumbs */
+const crumbs = await bundleModule("../app/lib/breadcrumbs", "crumbs");
+test("trailFor builds Dashboard › Section › Page from the URL", () => {
+  const labels = (p, q) => crumbs.trailFor(p, q).map((c) => c.label);
+  assert.deepEqual(labels("/app"), []);
+  assert.deepEqual(labels("/app/search"), ["Dashboard", "Search"]);
+  assert.deepEqual(labels("/app/search-tools", "?view=banners"), ["Dashboard", "Search", "Banners"]);
+  assert.deepEqual(labels("/app/merchandising", "?view=pinning&scope=collection"), ["Dashboard", "Collections", "Product pinning"]);
+  assert.deepEqual(labels("/app/merchandising", "?view=rules&scope=search"), ["Dashboard", "Search", "Merchandising rules"]);
+  assert.deepEqual(labels("/app/settings/general", "?tab=cards"), ["Dashboard", "Settings", "Product cards"]);
+  assert.deepEqual(labels("/app/filters/manage/"), ["Dashboard", "Filters", "Manage filters"]);
+  assert.deepEqual(labels("/app/unknown"), []);
+  const t = crumbs.trailFor("/app/theme-setup");
+  assert.equal(t[1].href, "/app/settings");
+  assert.equal(t[2].href, undefined);
+});

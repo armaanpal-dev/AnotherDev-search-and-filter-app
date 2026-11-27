@@ -253,7 +253,6 @@ export default function MerchandisingPage() {
   // No params shows everything, as before.
   const view = sp.get("view") as "pinning" | "rules" | "redirects" | null;
   const scope = sp.get("scope") as "search" | "collection" | null;
-  const parent = scope === "collection" ? { href: "/app/collections", label: "Collections" } : { href: "/app/search", label: "Search" };
   const where = scope === "collection" ? "collection" : "search";
   const heading =
     view === "pinning" ? "Product pinning"
@@ -274,7 +273,6 @@ export default function MerchandisingPage() {
   if (!isPro) {
     return (
       <s-page heading={heading}>
-        <s-link slot="breadcrumb-actions" href={parent.href}>{parent.label}</s-link>
         <s-banner tone="info" heading="Merchandising is on the paid plans">
           <s-paragraph>
             Pin products to the top of results, boost or bury by relevance, hide products,
@@ -298,7 +296,6 @@ export default function MerchandisingPage() {
   return (
     <ProductInfoContext.Provider value={productInfo}>
     <s-page heading={heading}>
-      <s-link slot="breadcrumb-actions" href={parent.href}>{parent.label}</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
       {experimentRunning && (
         <s-banner tone="info" heading="An A/B test is running">

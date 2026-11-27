@@ -54,7 +54,6 @@ export default function ThemeSetupPage() {
 
   return (
     <s-page heading="Theme setup">
-      <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
       {error && <s-banner tone="warning">{error}</s-banner>}
       <s-section heading="Your themes">
         <s-paragraph>

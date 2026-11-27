@@ -180,7 +180,6 @@ export default function SearchToolsPage() {
 
   return (
     <s-page heading={heading}>
-      <s-link slot="breadcrumb-actions" href="/app/search">Search</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
 
       {show("banners") && (

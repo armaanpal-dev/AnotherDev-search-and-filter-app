@@ -90,7 +90,6 @@ export default function CatalogHealthPage() {
 
   return (
     <s-page heading="Catalog check">
-      <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
       <s-section heading="Is the index in step with Shopify?">
         <s-paragraph>
           <s-text color="subdued">

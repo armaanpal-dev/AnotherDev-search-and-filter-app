@@ -134,7 +134,6 @@ export default function FilterToolsPage() {
 
   return (
     <s-page heading="Filter tools">
-      <s-link slot="breadcrumb-actions" href="/app/filters">Filters</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
 
       <s-section heading="Filter groups">
