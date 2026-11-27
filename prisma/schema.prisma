@@ -77,6 +77,8 @@ model Shop {
   // writing through the API, a dropped delivery), and a merchant will not
   // re-sync by hand — so the index quietly drifts without this.
   autoSyncEnabled Boolean   @default(true)
+  // Storefront API token this app created for country availability checks.
+  storefrontToken String?
   lastAutoSyncAt  DateTime?
 
   products      Product[]
@@ -89,6 +91,13 @@ model Shop {
   syncState     SyncState?
   filterConfig  FilterConfig[]
   presets       FilterPreset[]
+  banners       SearchBanner[]
+  blacklist     SuggestionBlacklist[]
+  sizeMappings  SizeMapping[]
+  mergedValues  MergedValue[]
+  filterGroups  FilterGroup[]
+  filterUsage   FilterUsage[]
+  countryAvailability CountryAvailability[]
 
   updatedAt    DateTime @updatedAt
 }
@@ -325,6 +334,8 @@ model SearchEvent {
   // A/B bucket this shopper was in, so Analytics can compare two rule sets.
   bucket        String?
   sessionToken  String?  // anonymous storefront session for CTR/CVR joins
+  // Shopper's country (Shopify.country), for the Locations report.
+  country       String?
   createdAt     DateTime @default(now())
 
   @@index([shopId, createdAt])
@@ -362,4 +373,110 @@ model SyncState {
   metafieldKeys  String[] @default([])
 
   updatedAt    DateTime @updatedAt
+}
+
+// --- Ported from the source app ---
+
+// Promotional banner shown on the results page for one search term.
+// "top" sits above the grid; "grid" is inserted as a card at `position`.
+model SearchBanner {
+  id              String   @id @default(cuid())
+  shopId          String
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  query           String   // normalised term
+  placement       String   // top | grid
+  position        Int      @default(1)
+  imageUrl        String   @default("")
+  targetUrl       String   @default("")
+  heading         String   @default("")
+  content         String   @default("")
+  buttonLabel     String   @default("")
+  backgroundColor String   @default("#f4f4f5")
+  textColor       String   @default("#18181b")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([shopId, query, active])
+}
+
+// Query suggestions that must never be offered in autocomplete.
+model SuggestionBlacklist {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  term      String
+  operator  String   @default("contains") // equals | contains | starts_with
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([shopId, term, operator])
+  @@index([shopId, active])
+}
+
+// Merchant ordering for size values the built-in order does not know.
+model SizeMapping {
+  id     String @id @default(cuid())
+  shopId String
+  shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  value  String // lowercased size label
+  rank   Int
+
+  @@unique([shopId, value])
+}
+
+// Several raw filter values shown and filtered as one ("Crimson", "red" -> "Red").
+model MergedValue {
+  id           String   @id @default(cuid())
+  shopId       String
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  source       String   // facet source, e.g. option:Color
+  target       String
+  sourceValues String[] @default([])
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  @@index([shopId, active])
+}
+
+// A facet set used only on the listed collections.
+model FilterGroup {
+  id          String   @id @default(cuid())
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name        String
+  collections String[] @default([]) // collection handles
+  sources     String[] @default([]) // ordered facet sources
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([shopId, active])
+}
+
+// Daily count of filter values shoppers applied (the Filters report).
+// Pre-aggregated so recording a refinement is one upsert, not one row.
+model FilterUsage {
+  id     String   @id @default(cuid())
+  shopId String
+  shop   Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  day    DateTime @db.Date
+  source String
+  value  String
+  count  Int      @default(0)
+
+  @@unique([shopId, day, source, value])
+  @@index([shopId, day])
+}
+
+// Products NOT for sale in a country (Storefront API @inContext answer).
+// Only the exceptions are stored; most products sell everywhere.
+model CountryAvailability {
+  id          String   @id @default(cuid())
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  country     String   // ISO 3166-1 alpha-2
+  unavailable String[] @default([]) // Shopify product ids (numeric part)
+  checkedAt   DateTime @default(now())
+
+  @@unique([shopId, country])
 }

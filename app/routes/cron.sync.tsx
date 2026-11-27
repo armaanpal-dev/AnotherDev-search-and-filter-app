@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import { runFullSync, isSyncRunning } from "../lib/sync/bulk.server";
 import { limitsForPlanName } from "../lib/plans";
+import { refreshCountryAvailability } from "../lib/markets/country.server";
 
 /**
  * Nightly catalog reconciliation.
@@ -105,6 +106,11 @@ async function run(request: Request): Promise<Response> {
           limits.productLimit === Infinity ? undefined : limits.productLimit,
       }).catch((e) => {
         console.error(`[cron] sync failed for ${shop.domain}:`, e?.message);
+      });
+
+      // Country availability rides along with the nightly pass when connected.
+      void refreshCountryAvailability(shop.id).catch((e) => {
+        console.error(`[cron] country availability failed for ${shop.domain}:`, e?.message);
       });
 
       started.push(shop.domain);

@@ -39,10 +39,13 @@ export default function App() {
         <s-link href="/app/sync">Index</s-link>
         <s-link href="/app/preview">Test search</s-link>
         <s-link href="/app/filters">Filters</s-link>
+        <s-link href="/app/filter-tools">Filter tools</s-link>
         <s-link href="/app/synonyms">Synonyms</s-link>
+        <s-link href="/app/search-tools">Search tools</s-link>
         <s-link href="/app/merchandising">Merchandising</s-link>
         <s-link href="/app/analytics">Analytics</s-link>
         <s-link href="/app/plans">Plans</s-link>
+        <s-link href="/app/theme-setup">Theme setup</s-link>
         <s-link href="/app/settings">Settings</s-link>
       </s-app-nav>
       <Outlet />

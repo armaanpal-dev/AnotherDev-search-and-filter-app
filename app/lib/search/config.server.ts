@@ -4,6 +4,7 @@ import { normalizeQuery } from "./normalize";
 import { TtlCache } from "../cache.server";
 import { resolveSettings, type WidgetSettings } from "../settings";
 import { toTsConfig, type SearchLanguage } from "./languages";
+import type { Banner, BlacklistRule, FilterGroupLite, MergeRule } from "./features";
 
 /** A single attribute-driven merchandising clause. */
 export interface MerchCondition {
@@ -42,7 +43,7 @@ export interface FilterPresetLite {
 export interface FilterConfigLite {
   source: string;
   label: string;
-  displayAs: "checkbox" | "range" | "swatch" | "list";
+  displayAs: "checkbox" | "range" | "swatch" | "list" | "button" | "dropdown";
   position: number;
   enabled: boolean;
 }
@@ -62,6 +63,13 @@ export interface ShopConfig {
   collectionTitles: Map<string, string>;
   // lowercased option value -> CSS colour or image URL, merchant-configurable.
   swatches: Map<string, string>;
+  /** Active banners keyed by normalised query. */
+  banners: Map<string, Banner[]>;
+  blacklist: BlacklistRule[];
+  /** lowercased size label -> merchant rank */
+  sizeRanks: Map<string, number>;
+  merges: MergeRule[];
+  filterGroups: FilterGroupLite[];
   matchRule: (
     normalizedQuery: string,
     collection?: string,
@@ -128,7 +136,7 @@ function parseSwatches(raw: unknown): Map<string, string> {
 }
 
 async function loadShopConfig(shopId: string): Promise<ShopConfig> {
-  const [shop, synonyms, redirects, rules, filters, collections, presets] = await Promise.all([
+  const [shop, synonyms, redirects, rules, filters, collections, presets, banners, blacklist, sizes, merges, groups] = await Promise.all([
     prisma.shop.findUnique({
       where: { id: shopId },
       select: { planName: true, settings: true, searchLanguage: true },
@@ -153,7 +161,35 @@ async function loadShopConfig(shopId: string): Promise<ShopConfig> {
       orderBy: { position: "asc" },
       take: 12,
     }),
+    prisma.searchBanner.findMany({
+      where: { shopId, active: true },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      take: 1000,
+    }),
+    prisma.suggestionBlacklist.findMany({ where: { shopId, active: true }, take: 1000 }),
+    prisma.sizeMapping.findMany({ where: { shopId }, take: 1000 }),
+    prisma.mergedValue.findMany({ where: { shopId, active: true }, take: 1000 }),
+    prisma.filterGroup.findMany({ where: { shopId, active: true }, orderBy: { createdAt: "asc" }, take: 200 }),
   ]);
+
+  const bannerMap = new Map<string, Banner[]>();
+  for (const b of banners) {
+    const list = bannerMap.get(b.query) ?? [];
+    list.push({
+      id: b.id,
+      query: b.query,
+      placement: b.placement === "grid" ? "grid" : "top",
+      position: b.position,
+      imageUrl: b.imageUrl,
+      targetUrl: b.targetUrl,
+      heading: b.heading,
+      content: b.content,
+      buttonLabel: b.buttonLabel,
+      backgroundColor: b.backgroundColor,
+      textColor: b.textColor,
+    });
+    bannerMap.set(b.query, list);
+  }
 
   const settings = resolveSettings(shop?.settings);
 
@@ -194,6 +230,11 @@ async function loadShopConfig(shopId: string): Promise<ShopConfig> {
       : DEFAULT_FILTERS,
     collectionTitles: new Map(collections.map((c) => [c.handle, c.title])),
     swatches: parseSwatches((settings as any).swatches),
+    banners: bannerMap,
+    blacklist: blacklist.map((b) => ({ term: b.term, operator: b.operator })),
+    sizeRanks: new Map(sizes.map((s) => [s.value.toLowerCase(), s.rank])),
+    merges: merges.map((m) => ({ source: m.source, target: m.target, sourceValues: m.sourceValues })),
+    filterGroups: groups.map((g) => ({ collections: g.collections, sources: g.sources })),
     matchRule(normalizedQuery: string, collection?: string, bucket?: string) {
       // Highest-priority rule whose trigger(s) match. A rule with no trigger at
       // all is a global rule — valid now that conditions exist, since it can

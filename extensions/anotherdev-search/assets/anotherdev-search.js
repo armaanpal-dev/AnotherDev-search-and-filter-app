@@ -59,8 +59,11 @@
     amount_with_apostrophe_separator: [2, "'", "."],
   };
 
-  function formatMoney(amount, cfg, currencyCode) {
-    var value = Number(amount) * currencyRate();
+  // `local` = the amount is already in the shopper's currency (it came from
+  // Shopify's own /products/<handle>.js), so the conversion rate must not be
+  // applied a second time.
+  function formatMoney(amount, cfg, currencyCode, local) {
+    var value = Number(amount) * (local ? 1 : currencyRate());
     var format = cfg && cfg.moneyFormat;
     if (format && /\{\{\s*\w+\s*\}\}/.test(format)) {
       return format.replace(/\{\{\s*(\w+)\s*\}\}/g, function (_, name) {
@@ -1128,14 +1131,14 @@
      Shopify section. So we add with that section requested, get its freshly
      rendered HTML back, inject it into the live drawer, then open it. The
      section id is read from the DOM, so this adapts to any theme. */
-  function addViaSectionDrawer(variantId, drawerEl) {
+  function addViaSectionDrawer(variantId, drawerEl, qty) {
     var section = drawerEl.closest('[id^="shopify-section-"]');
     if (!section) return Promise.resolve({ added: false, handled: false });
     var sectionId = section.id.replace("shopify-section-", "");
 
     return postAdd({
       id: variantId,
-      quantity: 1,
+      quantity: qty || 1,
       sections: [sectionId],
       sections_url: window.location.pathname,
     }).then(function (data) {
@@ -1192,6 +1195,394 @@
      while the cart actually holds 2. */
   var cartAddInFlight = false;
 
+
+  /* ------------------------------------------------------------------------
+     Quick View (cardAction "quick_view"): a modal with the product's options,
+     a quantity and add-to-cart. It reads Shopify's own /products/<handle>.js,
+     so prices and stock are the shopper's market's, and it adds through
+     addToCartFromButton so every cart integration the cards support works here.
+     ------------------------------------------------------------------------ */
+  /** Merchant custom CSS / JS from Settings > Customization. Runs once. */
+  var customInjected = false;
+  function injectCustomCode(s) {
+    if (customInjected) return;
+    customInjected = true;
+    if (s.customCss) {
+      var st = document.createElement("style");
+      st.setAttribute("data-adsf-custom", "");
+      st.textContent = s.customCss;
+      document.head.appendChild(st);
+    }
+    if (s.customJs) {
+      try {
+        // eslint-disable-next-line no-new-func
+        new Function(s.customJs)();
+      } catch (e) {
+        if (window.console) console.warn("[AnotherDev] custom JavaScript failed:", e);
+      }
+    }
+  }
+
+  /**
+   * Wishlist Growth: the app reads window.pageDataMap[handle] and binds its own
+   * click handler to .wishlist-btn-container. We render the container and feed
+   * the map; the wishlist app does the rest.
+   */
+  function wishlistReady(cfg) {
+    return !!(cfg.wishlistGrowth && typeof window.pageDataMap !== "undefined");
+  }
+  function wishlistButton(p) {
+    return '<div class="wishlist-btn-container adsf-wishlist" data-product-id="' + esc(p.handle) + '">' +
+      '<button type="button" class="wishlist-toggle-btn" aria-label="Add to wishlist">' +
+      '<svg class="wishlist-icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.67 5.47c-1.99-1.64-4.95-1.35-6.78.48L12 6.84l-.89-.89C9.29 4.13 6.32 3.83 4.33 5.47c-2.28 1.88-2.4 5.27-.36 7.31l7.67 7.67c.2.2.51.2.71 0l7.67-7.67c2.05-2.04 1.93-5.42-.35-7.31z"/></svg>' +
+      "</button></div>";
+  }
+  function wishlistFeed(hits) {
+    if (typeof window.pageDataMap === "undefined") return;
+    hits.forEach(function (p) {
+      window.pageDataMap[p.handle] = {
+        id: p.variantId || "",
+        title: "Default Title",
+        price: Math.round((p.priceMin || 0) * 100),
+        compare_at_price: null,
+        available: !!p.available,
+        product_id: p.productId,
+        product_handle: p.handle,
+        product_image: p.imageUrl,
+        product_title: p.title,
+      };
+    });
+    try { document.dispatchEvent(new CustomEvent("wishlist:refresh")); } catch (e) { /* old browser */ }
+  }
+
+
+  /* ------------------------------------------------------------------------
+     Theme Quick View adapters (setting quickViewSource: "theme").
+     Only explicit, verified component contracts are used; anything else falls
+     back to the app's own Quick View. Ported from the source app:
+       - Dawn (and Dawn-based themes): <quick-add-modal> + HTMLUpdateUtility
+       - Prestige 10.11.0: <quick-buy-modal> / x-modal + template#quick-buy-content
+     ------------------------------------------------------------------------ */
+  function productPageUrl(handle) {
+    var root = (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || "/";
+    var url = new URL(root + "products/" + encodeURIComponent(handle), location.origin);
+    var t = window.Shopify && window.Shopify.theme;
+    if (t && t.role === "unpublished") url.searchParams.set("preview_theme_id", t.id);
+    return url.toString();
+  }
+
+  function dawnModal() {
+    var Ctor = window.customElements && customElements.get("quick-add-modal");
+    var Dialog = window.customElements && customElements.get("modal-dialog");
+    if (!Ctor || typeof Ctor.prototype.preprocessHTML !== "function") return null;
+    if (!Dialog || typeof Dialog.prototype.show !== "function") return null;
+    if (typeof window.HTMLUpdateUtility === "undefined" || typeof HTMLUpdateUtility.setInnerHTML !== "function") return null;
+    var modal = document.querySelector("quick-add-modal");
+    var built = false;
+    if (!modal) {
+      built = true;
+      // A grid of single-variant products loads Quick Add's scripts without
+      // rendering a modal; build Dawn's documented empty shell.
+      var tpl = document.createElement("template");
+      tpl.innerHTML = '<quick-add-modal id="QuickAdd-adsf" class="quick-add-modal"><div role="dialog" aria-modal="true" aria-label="Product quick view" tabindex="-1" class="quick-add-modal__content global-settings-popup"><button type="button" id="ModalClose-adsf" class="quick-add-modal__toggle" aria-label="Close">&times;</button><div id="QuickAddInfo-adsf" class="quick-add-modal__content-info"></div></div></quick-add-modal>';
+      modal = tpl.content.firstElementChild;
+      modal.moved = true;
+      modal.dataset.section = "adsf";
+      document.body.appendChild(modal);
+    }
+    var ok = typeof modal.preprocessHTML === "function" && typeof modal.hide === "function" &&
+      modal.querySelector('[id^="QuickAddInfo-"]') && modal.querySelector('[role="dialog"]');
+    if (!ok && built) modal.remove();
+    return ok ? modal : null;
+  }
+
+  function openDawn(modal, handle, trigger) {
+    return fetch(productPageUrl(handle), { credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("load"); return r.text(); })
+      .then(function (html) {
+        var page = new DOMParser().parseFromString(html, "text/html");
+        var product = page.querySelector("product-info[data-section]");
+        if (!product || !product.querySelector("product-form")) throw new Error("unsupported");
+        // Dawn's own Quick Add preprocessing: strips the rest of the page and
+        // keeps the theme's variant, price, media and cart components.
+        modal.preprocessHTML(product);
+        var content = modal.querySelector('[id^="QuickAddInfo-"]');
+        HTMLUpdateUtility.setInnerHTML(content, product.outerHTML);
+        var names = ["product-info", "product-form", "variant-selects"].filter(function (n) { return content.querySelector(n); });
+        return Promise.all(names.map(function (n) { return customElements.whenDefined(n); }));
+      })
+      .then(function () {
+        customElements.get("modal-dialog").prototype.show.call(modal, trigger);
+        return true;
+      });
+  }
+
+  function prestigeBase() {
+    var t = window.Shopify && window.Shopify.theme;
+    var QuickBuy = window.customElements && customElements.get("quick-buy-modal");
+    var XModal = window.customElements && customElements.get("x-modal");
+    if (!t || t.schema_name !== "Prestige" || t.schema_version !== "10.11.0" || !QuickBuy || !XModal) return null;
+    if (Object.getPrototypeOf(QuickBuy.prototype) !== XModal.prototype) return null;
+    if (typeof XModal.prototype.show !== "function" || !document.querySelector("template#modal-default-template")) return null;
+    return XModal.prototype;
+  }
+
+  function openPrestige(base, handle) {
+    // One instance: Prestige adds a document cart listener in its constructor.
+    var modal = document.getElementById("adsf-prestige-quick-buy");
+    if (!modal) {
+      modal = document.createElement("quick-buy-modal");
+      modal.id = "adsf-prestige-quick-buy";
+      modal.className = "quick-buy-modal modal";
+      document.body.appendChild(modal);
+    }
+    return fetch(productPageUrl(handle), { credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("load"); return r.text(); })
+      .then(function (html) {
+        var page = new DOMParser().parseFromString(html, "text/html");
+        var tpl = page.querySelector("template#quick-buy-content");
+        var content = tpl && tpl.content;
+        var formId = content && content.querySelector("product-rerender") &&
+          content.querySelector("product-rerender").getAttribute("observe-form");
+        var form = formId && content.getElementById(formId);
+        if (!form || !form.querySelector('input[name="id"]') || !form.querySelector("buy-buttons")) throw new Error("unsupported");
+        Array.prototype.forEach.call(content.querySelectorAll("noscript"), function (n) { n.remove(); });
+        modal.setAttribute("handle", handle);
+        modal.replaceChildren(content);
+        if (window.Shopify.PaymentButton) window.Shopify.PaymentButton.init();
+        // The base x-modal lifecycle; QuickBuyModal.show() would fetch again.
+        return Promise.resolve(base.show.call(modal)).then(function () { return true; });
+      });
+  }
+
+  /** Resolve true when a theme Quick View opened; false means use the app's. */
+  function openThemeQuickView(handle, trigger) {
+    try {
+      var base = prestigeBase();
+      if (base) return openPrestige(base, handle).catch(function () { return false; });
+      var modal = dawnModal();
+      if (modal) return openDawn(modal, handle, trigger).catch(function () { return false; });
+    } catch (e) { /* fall through */ }
+    return Promise.resolve(false);
+  }
+
+  var qvEl = null;
+  var qvReturnFocus = null;
+
+  function qvOptionNames(product) {
+    return (product.options || []).map(function (o) { return typeof o === "string" ? o : o.name; });
+  }
+  function qvVariantOptions(v) {
+    if (Array.isArray(v.options)) return v.options;
+    return [v.option1, v.option2, v.option3].filter(function (x) { return x != null; });
+  }
+  function qvResolve(product, selected) {
+    for (var i = 0; i < product.variants.length; i++) {
+      var opts = qvVariantOptions(product.variants[i]);
+      var ok = true;
+      for (var j = 0; j < selected.length; j++) if (opts[j] !== selected[j]) { ok = false; break; }
+      if (ok) return product.variants[i];
+    }
+    return null;
+  }
+  function qvFirstAvailable(product) {
+    for (var i = 0; i < product.variants.length; i++) if (product.variants[i].available) return product.variants[i];
+    return product.variants[0] || null;
+  }
+
+  function closeQuickView() {
+    if (!qvEl) return;
+    qvEl.remove();
+    qvEl = null;
+    document.documentElement.classList.remove("adsf-qv-open");
+    if (qvReturnFocus && qvReturnFocus.focus) qvReturnFocus.focus();
+  }
+
+  function openQuickView(handle, cfg, onAdded) {
+    closeQuickView();
+    qvReturnFocus = document.activeElement;
+    qvEl = document.createElement("div");
+    qvEl.className = "adsf-qv";
+    qvEl.setAttribute("role", "dialog");
+    qvEl.setAttribute("aria-modal", "true");
+    qvEl.setAttribute("aria-label", "Quick view");
+    qvEl.innerHTML = '<div class="adsf-qv__backdrop" data-adsf-qv-close></div>' +
+      '<div class="adsf-qv__panel"><button type="button" class="adsf-qv__close" data-adsf-qv-close aria-label="Close">×</button>' +
+      '<div class="adsf-qv__body"><div class="adsf-skel adsf-skel--img"></div></div></div>';
+    document.body.appendChild(qvEl);
+    document.documentElement.classList.add("adsf-qv-open");
+    qvEl.addEventListener("click", function (e) {
+      if (e.target.closest && e.target.closest("[data-adsf-qv-close]")) closeQuickView();
+    });
+    qvEl.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeQuickView();
+      if (e.key !== "Tab") return;
+      var f = qvEl.querySelectorAll("button, select, input, a[href]");
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+    qvEl.querySelector(".adsf-qv__close").focus();
+
+    fetch(shopUrl("products/" + encodeURIComponent(handle) + ".js"), { credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("load"); return r.json(); })
+      .then(function (product) { if (qvEl) renderQuickView(product, cfg, onAdded); })
+      .catch(function () {
+        if (!qvEl) return;
+        qvEl.querySelector(".adsf-qv__body").innerHTML =
+          '<p class="adsf-error">This product could not be loaded.</p><a href="' +
+          esc(shopUrl("products/" + handle)) + '">View product</a>';
+      });
+  }
+
+  function renderQuickView(product, cfg, onAdded) {
+    var names = qvOptionNames(product);
+    var current = qvFirstAvailable(product);
+    var selected = current ? qvVariantOptions(current).slice() : [];
+    var single = product.variants.length === 1 && /default title/i.test(product.variants[0].title || "");
+    var body = qvEl.querySelector(".adsf-qv__body");
+
+    var pickers = single ? "" : names.map(function (name, i) {
+      var values = [];
+      product.variants.forEach(function (v) {
+        var val = qvVariantOptions(v)[i];
+        if (val != null && values.indexOf(val) < 0) values.push(val);
+      });
+      return '<label class="adsf-qv__opt"><span>' + esc(name) + '</span><select data-adsf-qv-opt="' + i + '">' +
+        values.map(function (val) {
+          return '<option value="' + esc(val) + '"' + (val === selected[i] ? " selected" : "") + ">" + esc(val) + "</option>";
+        }).join("") + "</select></label>";
+    }).join("");
+
+    var img = (current && current.featured_image && current.featured_image.src) || product.featured_image || "";
+    body.innerHTML =
+      '<div class="adsf-qv__media">' + (img ? '<img src="' + esc(img) + '" alt="' + esc(product.title) + '">' : "") + "</div>" +
+      '<div class="adsf-qv__info"><h2 class="adsf-qv__title">' + esc(product.title) + "</h2>" +
+      (cfg.showVendor && product.vendor ? '<div class="adsf-card__vendor">' + esc(product.vendor) + "</div>" : "") +
+      '<div class="adsf-qv__price" data-adsf-qv-price></div>' + pickers +
+      '<label class="adsf-qv__opt"><span>Quantity</span><input type="number" min="1" max="999" value="1" data-adsf-qv-qty></label>' +
+      '<button type="button" class="adsf-card__add adsf-card__add--full" data-adsf-qv-add data-adsf-add-product="' + esc(product.id) + '"></button>' +
+      '<a class="adsf-qv__more" href="' + esc(shopUrl("products/" + product.handle)) + '">View full details</a></div>';
+
+    var addBtn = body.querySelector("[data-adsf-qv-add]");
+    var priceEl = body.querySelector("[data-adsf-qv-price]");
+    var qtyEl = body.querySelector("[data-adsf-qv-qty]");
+
+    function sync() {
+      var v = qvResolve(product, selected);
+      if (v) {
+        priceEl.innerHTML = esc(formatMoney(v.price / 100, cfg, null, true)) +
+          (v.compare_at_price > v.price ? " <s>" + esc(formatMoney(v.compare_at_price / 100, cfg, null, true)) + "</s>" : "");
+        if (v.featured_image && v.featured_image.src) {
+          var im = body.querySelector(".adsf-qv__media img");
+          if (im) im.src = v.featured_image.src;
+        }
+      }
+      var can = !!(v && v.available);
+      addBtn.disabled = !can;
+      addBtn.textContent = !v ? "Unavailable" : can ? addLabel(cfg) : "Sold out";
+      addBtn.setAttribute("data-adsf-add", v ? String(v.id) : "");
+    }
+
+    Array.prototype.forEach.call(body.querySelectorAll("[data-adsf-qv-opt]"), function (sel) {
+      sel.addEventListener("change", function () {
+        selected[Number(sel.getAttribute("data-adsf-qv-opt"))] = sel.value;
+        sync();
+      });
+    });
+    addBtn.addEventListener("click", function () {
+      addBtn.setAttribute("data-adsf-qty", String(qtyEl.value || 1));
+      addToCartFromButton(addBtn, cfg, function () {
+        if (onAdded) onAdded();
+        setTimeout(closeQuickView, 600);
+      });
+    });
+    sync();
+  }
+
+  /* ------------------------------------------------------------------------
+     Market pricing: the index stores the primary market's prices. When the
+     merchant turns this on, visible cards are re-read from /products/<handle>.js,
+     which Shopify answers in the shopper's market (currency, price list,
+     availability). Cached per country+currency for 10 minutes.
+     ------------------------------------------------------------------------ */
+  var MARKET_TTL = 10 * 60 * 1000;
+  function marketKey(handle) {
+    var S = window.Shopify || {};
+    return "adsf:mp:" + (S.country || "") + ":" + ((S.currency && S.currency.active) || "") + ":" + handle;
+  }
+  function marketRead(handle) {
+    try {
+      var raw = sessionStorage.getItem(marketKey(handle));
+      if (!raw) return null;
+      var hit = JSON.parse(raw);
+      return Date.now() - hit.at < MARKET_TTL ? hit.v : null;
+    } catch (e) { return null; }
+  }
+  function marketWrite(handle, v) {
+    try { sessionStorage.setItem(marketKey(handle), JSON.stringify({ at: Date.now(), v: v })); } catch (e) { /* storage full or blocked */ }
+  }
+  function marketProduct(handle) {
+    var hit = marketRead(handle);
+    if (hit) return Promise.resolve(hit);
+    return fetch(shopUrl("products/" + encodeURIComponent(handle) + ".js"), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (p) {
+        if (!p) return null;
+        var v = { min: p.price_min / 100, max: p.price_max / 100, available: !!p.available };
+        marketWrite(handle, v);
+        return v;
+      })
+      .catch(function () { return null; });
+  }
+  function applyMarketPricing(root, cfg) {
+    if (!cfg.marketPricing || !root) return;
+    var cards = Array.prototype.slice.call(root.querySelectorAll("[data-adsf-mp]"));
+    var i = 0;
+    function next() {
+      var el = cards[i++];
+      if (!el) return Promise.resolve();
+      return marketProduct(el.getAttribute("data-adsf-mp")).then(function (v) {
+        if (v && el.isConnected) {
+          var price = el.querySelector(".adsf-card__price");
+          if (price) {
+            price.textContent = v.min === v.max
+              ? formatMoney(v.min, cfg, null, true)
+              : formatMoney(v.min, cfg, null, true) + " – " + formatMoney(v.max, cfg, null, true);
+          }
+          if (!v.available && !el.querySelector(".adsf-card__soldout")) {
+            var a = el.querySelector("a");
+            if (a) a.insertAdjacentHTML("beforeend", '<span class="adsf-card__soldout">Sold out</span>');
+            var btn = el.querySelector("[data-adsf-add]");
+            if (btn) btn.remove();
+          }
+        }
+        return next();
+      });
+    }
+    // Six at a time: enough to fill a page quickly without a request storm.
+    for (var k = 0; k < 6; k++) next();
+  }
+
+  /** Search banners: "top" above the grid, "grid" inserted as a card. */
+  function bannerHtml(b, inGrid) {
+    var inner =
+      (b.imageUrl ? '<img src="' + esc(b.imageUrl) + '" alt="' + esc(b.heading || "") + '" loading="lazy">' : "") +
+      (b.heading || b.content || b.buttonLabel
+        ? '<div class="adsf-banner__text">' +
+          (b.heading ? '<strong class="adsf-banner__heading">' + esc(b.heading) + "</strong>" : "") +
+          (b.content ? '<p class="adsf-banner__content">' + esc(b.content) + "</p>" : "") +
+          (b.buttonLabel ? '<span class="adsf-banner__button">' + esc(b.buttonLabel) + "</span>" : "") +
+          "</div>"
+        : "");
+    var style = ' style="background:' + esc(b.backgroundColor) + ";color:" + esc(b.textColor) + '"';
+    var cls = "adsf-banner" + (inGrid ? " adsf-banner--grid adsf-card" : " adsf-banner--top");
+    return b.targetUrl
+      ? '<a class="' + cls + '" href="' + esc(b.targetUrl) + '"' + style + ">" + inner + "</a>"
+      : '<div class="' + cls + '"' + style + ">" + inner + "</div>";
+  }
+
   /**
    * Add the button's variant, then present the result the way this theme does.
    *
@@ -1212,6 +1603,8 @@
     if (!button || cartAddInFlight) return;
 
     var variantId = variantIdOf(button.getAttribute("data-adsf-add"));
+    // Quick View sets a quantity; result-card buttons always add one.
+    var qty = Math.max(1, Math.min(999, parseInt(button.getAttribute("data-adsf-qty") || "1", 10) || 1));
     if (!variantId) {
       showCartToast({ ok: false, message: "This product is unavailable" });
       return;
@@ -1245,7 +1638,7 @@
       // {items:[…]} payload has no top-level `key` and throws.
       postAdd({
         id: variantId,
-        quantity: 1,
+        quantity: qty,
         sections: cartUI.getSectionsToRender().map(function (s) { return s.id; }),
         sections_url: window.location.pathname,
       })
@@ -1268,7 +1661,7 @@
     var drawerEl = thirdParty ? null : document.querySelector("cart-drawer");
     var sectionFirst =
       drawerEl && drawerEl.closest('[id^="shopify-section-"]')
-        ? addViaSectionDrawer(variantId, drawerEl)
+        ? addViaSectionDrawer(variantId, drawerEl, qty)
         : Promise.resolve({ added: false, handled: false });
 
     sectionFirst
@@ -1279,7 +1672,7 @@
         // side cart. Then we check: if nothing is visibly open, we confirm with
         // our own toast. "Verify, don't assume" is what makes unknown themes
         // degrade gracefully — and we never navigate away from the results.
-        return postAdd({ id: variantId, quantity: 1 }).then(function () {
+        return postAdd({ id: variantId, quantity: qty }).then(function () {
           return { added: true, handled: false };
         });
       })
@@ -1422,6 +1815,7 @@
       sp.set("perPage", perPage);
       if (collection) sp.set("collection", collection);
       sp.set("st", sessionToken);
+      if (window.Shopify && window.Shopify.country) sp.set("country", window.Shopify.country);
       request(cfg.proxy + "/search?" + sp.toString())
         .then(function (data) {
           if (!data) return;
@@ -1457,12 +1851,24 @@
         var cl = grid.querySelector("[data-adsf-clear]");
         if (cl) cl.addEventListener("click", clearAll);
       } else {
-        grid.innerHTML = data.hits.map(function (p) { return card(p); }).join("");
+        var cards = data.hits.map(function (p) { return card(p); });
+        // Grid banners take a card slot at their 1-based position (page 1 only).
+        if (state.page === 1 || !state.page) {
+          (data.banners || [])
+            .filter(function (b) { return b.placement === "grid"; })
+            .sort(function (a, b) { return a.position - b.position; })
+            .forEach(function (b) { cards.splice(Math.min(cards.length, b.position - 1), 0, bannerHtml(b, true)); });
+        }
+        grid.innerHTML = cards.join("");
         Array.prototype.forEach.call(grid.querySelectorAll("[data-adsf-hit]"), function (a) {
           a.addEventListener("click", function () { track(cfg.proxy, "click", state.term, a.getAttribute("data-adsf-hit")); });
         });
         if (cfg.quickAdd) bindQuickAdd();
+        if (cfg.cardAction === "quick_view") bindQuickView();
+        if (wishlistReady(cfg)) wishlistFeed(data.hits);
+        applyMarketPricing(grid, cfg);
       }
+      renderTopBanners(data.banners || []);
 
       renderChips();
       renderFacets(lastFacets);
@@ -1472,7 +1878,9 @@
 
     function card(p) {
       var canQuickAdd = cfg.quickAdd && p.available && p.variantCount === 1 && p.variantId;
-      return '<article class="adsf-card' + (p.pinned ? " adsf-card--pinned" : "") + '">' +
+      var canQuickView = cfg.cardAction === "quick_view";
+      return '<article class="adsf-card' + (p.pinned ? " adsf-card--pinned" : "") + '" data-adsf-mp="' + esc(p.handle) + '">' +
+        (wishlistReady(cfg) ? wishlistButton(p) : "") +
         '<a href="' + esc(shopUrl("products/" + p.handle)) + '" data-adsf-hit="' + esc(p.productId) + '">' +
         (p.imageUrl
           ? '<img class="adsf-card__img" src="' + esc(p.imageUrl) + '" alt="' + esc(p.imageAlt || p.title) + '" loading="lazy" width="300" height="300">'
@@ -1490,7 +1898,51 @@
             '" data-adsf-handle="' + esc(p.handle) + '">' +
             esc(addLabel(cfg)) + "</button>"
           : "") +
+        (canQuickView
+          ? '<button type="button" class="adsf-card__add adsf-card__qv' +
+            (cfg.cardButtonFullWidth === false ? "" : " adsf-card__add--full") +
+            '" data-adsf-qv="' + esc(p.handle) + '" data-adsf-qv-product="' + esc(p.productId) + '">' +
+            (p.available ? "Quick view" : "View") + "</button>"
+          : "") +
         "</article>";
+    }
+
+    function bindQuickView() {
+      Array.prototype.forEach.call(grid.querySelectorAll("[data-adsf-qv]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var productId = btn.getAttribute("data-adsf-qv-product");
+          track(cfg.proxy, "click", state.term, productId);
+          var handle = btn.getAttribute("data-adsf-qv");
+          var openApp = function () {
+            openQuickView(handle, cfg, function () {
+              track(cfg.proxy, "add_to_cart", state.term, productId);
+            });
+          };
+          if (cfg.quickViewSource !== "theme") return openApp();
+          btn.disabled = true;
+          openThemeQuickView(handle, btn).then(function (opened) {
+            btn.disabled = false;
+            if (!opened) openApp();
+          });
+        });
+      });
+    }
+
+    var topBanner = null;
+    function renderTopBanners(banners) {
+      var top = (state.page === 1 || !state.page)
+        ? banners.filter(function (b) { return b.placement === "top"; })
+        : [];
+      if (!top.length) {
+        if (topBanner) { topBanner.remove(); topBanner = null; }
+        return;
+      }
+      if (!topBanner) {
+        topBanner = document.createElement("div");
+        topBanner.className = "adsf-banners";
+        grid.parentNode.insertBefore(topBanner, grid);
+      }
+      topBanner.innerHTML = top.map(function (b) { return bannerHtml(b, false); }).join("");
     }
 
     /**
@@ -1633,7 +2085,11 @@
       var startClosed = layout !== "inline";
 
       facets.forEach(function (f) {
-        var group = el("div", "adsf-facet");
+        // A facet with one value cannot narrow anything; hide it unless the
+        // merchant asked to keep it (or a value of it is already selected).
+        if (!cfg.showSingleValueFacets && f.displayAs !== "range" && f.values.length < 2 &&
+            !(state.filters[f.source] || []).length) return;
+        var group = el("div", "adsf-facet adsf-facet--" + (f.displayAs || "checkbox"));
         var heading = el("h4", "adsf-facet__title");
         var btn = el("button", "adsf-facet__toggle");
         btn.type = "button";
@@ -1655,6 +2111,8 @@
 
         if (f.displayAs === "range") {
           bodyWrap.appendChild(rangeFacet(f));
+        } else if (f.displayAs === "dropdown") {
+          bodyWrap.appendChild(dropdownFacet(f));
         } else {
           bodyWrap.appendChild(listFacet(f));
         }
@@ -1735,8 +2193,29 @@
       row.appendChild(min);
       row.appendChild(el("span", "adsf-facet__dash", "–"));
       row.appendChild(max);
-      wrap.appendChild(row);
-      if (hi > lo) wrap.appendChild(slider);
+      var style = cfg.priceFilterStyle || "both";
+      if (style !== "slider" || hi <= lo) wrap.appendChild(row);
+      if (hi > lo && style !== "inputs") wrap.appendChild(slider);
+      return wrap;
+    }
+
+    /** One select per facet: compact, single choice. */
+    function dropdownFacet(f) {
+      var wrap = el("div", "adsf-facet__values");
+      var sel = el("select", "adsf-facet__select");
+      sel.setAttribute("aria-label", f.label);
+      var current = (state.filters[f.source] || [])[0] || "";
+      sel.innerHTML = '<option value="">All</option>' + f.values.map(function (v) {
+        return '<option value="' + esc(v.value) + '"' + (v.value === current ? " selected" : "") + ">" +
+          esc(v.label) + (cfg.showFacetCounts === false ? "" : " (" + v.count + ")") + "</option>";
+      }).join("");
+      sel.addEventListener("change", function () {
+        if (sel.value) state.filters[f.source] = [sel.value];
+        else delete state.filters[f.source];
+        state.page = 1;
+        apply(true);
+      });
+      wrap.appendChild(sel);
       return wrap;
     }
 
@@ -1761,7 +2240,8 @@
       });
 
       ordered.forEach(function (v, index) {
-        var li = el("li", "adsf-facet__item" + (f.displayAs === "swatch" ? " adsf-facet__item--swatch" : ""));
+        var li = el("li", "adsf-facet__item" + (f.displayAs === "swatch" ? " adsf-facet__item--swatch" : "") +
+          (f.displayAs === "button" ? " adsf-facet__item--button" : ""));
         // Unique per row, not derived from the value.
         //
         // Stripping non-alphanumerics collapsed "Red" and "Red!" (and "X L" and
@@ -1883,7 +2363,13 @@
       apply(true);
     }
 
-    function apply(push) { syncUrl(push); fetchResults(); }
+    function apply(push) {
+      syncUrl(push);
+      fetchResults();
+      if (cfg.scrollOnFilter && grid && grid.getBoundingClientRect().top < 0) {
+        try { grid.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) { grid.scrollIntoView(); }
+      }
+    }
 
     // --- mobile drawer, with a focus trap ---------------------------------
     var lastFocused = null;
@@ -3149,6 +3635,21 @@
     cfg.gridColumns = s.gridColumns || 4;
     cfg.showVendor = !!s.showVendor;
     cfg.quickAdd = !!s.quickAdd;
+    cfg.cardAction = s.cardAction || (s.quickAdd ? "quick_add" : "none");
+    cfg.marketPricing = !!s.marketPricing;
+    cfg.priceFilterStyle = s.priceFilterStyle || "both";
+    cfg.showSingleValueFacets = s.showSingleValueFacets !== false;
+    cfg.scrollOnFilter = !!s.scrollOnFilter;
+    cfg.facetColumns = s.facetColumns || 0;
+    cfg.wishlistGrowth = !!s.wishlistGrowth;
+    cfg.quickViewSource = s.quickViewSource === "theme" ? "theme" : "app";
+    if (s.filterSidebarWidth) document.documentElement.style.setProperty("--adsf-sidebar-w", s.filterSidebarWidth + "px");
+    if (s.filterDrawerWidth) document.documentElement.style.setProperty("--adsf-drawer-w", s.filterDrawerWidth + "px");
+    if (cfg.facetColumns) {
+      document.documentElement.style.setProperty("--adsf-facet-cols", String(cfg.facetColumns));
+      document.documentElement.classList.add("adsf-has-facet-cols");
+    }
+    injectCustomCode(s);
     cfg.swatches = s.swatches || {};
     cfg.presets = Array.isArray(s.presets) ? s.presets : [];
     cfg.voiceSearch = s.voiceSearch !== false;

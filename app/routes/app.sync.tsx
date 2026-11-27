@@ -162,6 +162,13 @@ export default function SyncPage() {
         </s-paragraph>
       </s-section>
 
+      <s-section slot="aside" heading="Catalog check">
+        <s-paragraph>
+          <s-text color="subdued">
+            Think something is missing from search? <s-link href="/app/catalog-health">Compare the index with Shopify</s-link>.
+          </s-text>
+        </s-paragraph>
+      </s-section>
       <s-section slot="aside" heading="Next steps">
         <s-paragraph>
           <s-text color="subdued">

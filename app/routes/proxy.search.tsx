@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getSearchEngine } from "../lib/search/index.server";
-import { recordSearchEvent } from "../lib/analytics.server";
+import { recordFilterUsage, recordSearchEvent } from "../lib/analytics.server";
 import {
   parseSearchParams,
   jsonCors,
@@ -41,6 +41,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     includeUnavailable: settings.showOutOfStock,
     typoTolerance: settings.typoTolerance,
     semantic: settings.semanticSearch,
+    variantAvailability: settings.variantAvailabilityFilter,
+    country: settings.countryAvailability
+      ? url.searchParams.get("country")?.toUpperCase() ?? undefined
+      : undefined,
     bucket,
   });
 
@@ -54,7 +58,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       resultsCount: result.total,
       sessionToken,
       bucket,
+      country: url.searchParams.get("country")?.toUpperCase() ?? undefined,
     });
+  }
+  // Filters report: count what shoppers refine by, on the first page only so
+  // paging through a filtered result is not counted again.
+  if (page === 1 && Object.keys(filters).length) {
+    void recordFilterUsage(shop.shopId, filters);
   }
 
   return jsonCors(result, 200, {

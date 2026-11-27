@@ -8,7 +8,7 @@ import { invalidateShopConfig } from "../lib/search/config.server";
 import { Stat, Row, Empty, TILES, useSaveToast } from "../components/ui";
 
 /** How a facet may be rendered. Anything else is a typo, not a choice. */
-const DISPLAY_AS = ["checkbox", "swatch", "list", "range"] as const;
+const DISPLAY_AS = ["checkbox", "swatch", "list", "range", "button", "dropdown"] as const;
 type DisplayAs = (typeof DISPLAY_AS)[number];
 
 /** Sources with no `option:`/`metafield:` prefix that the engine understands. */
@@ -289,6 +289,8 @@ export default function FiltersPage() {
                       <s-option value="checkbox">Checkbox list</s-option>
                       <s-option value="swatch">Colour swatch</s-option>
                       <s-option value="list">Compact list</s-option>
+                      <s-option value="button">Buttons</s-option>
+                      <s-option value="dropdown">Dropdown</s-option>
                       <s-option value="range">Numeric range</s-option>
                     </s-select>
                     <s-button type="submit" variant="secondary">Save</s-button>
@@ -320,6 +322,8 @@ export default function FiltersPage() {
                 <s-option value="checkbox">Checkbox list</s-option>
                 <s-option value="swatch">Colour swatch</s-option>
                 <s-option value="list">Compact list</s-option>
+                <s-option value="button">Buttons</s-option>
+                <s-option value="dropdown">Dropdown</s-option>
                 <s-option value="range">Numeric range</s-option>
               </s-select>
             </s-grid>

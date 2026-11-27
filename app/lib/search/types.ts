@@ -34,6 +34,10 @@ export interface SearchQuery {
   facetsOnly?: boolean;
   // Include out-of-stock products in results
   includeUnavailable?: boolean;
+  // Shopper country; with countryAvailability on, products not sold there are dropped.
+  country?: string;
+  // Option filters require the MATCHING variant to be in stock.
+  variantAvailability?: boolean;
   // Merchant toggle: when false, fuzzy/trigram matching is skipped (exact only).
   typoTolerance?: boolean;
   // Merchant toggle: blend pgvector similarity into ranking (Pro + configured).
@@ -81,7 +85,7 @@ export interface FacetValue {
 export interface Facet {
   source: string;
   label: string;
-  displayAs: "checkbox" | "range" | "swatch" | "list";
+  displayAs: "checkbox" | "range" | "swatch" | "list" | "button" | "dropdown";
   values: FacetValue[];
   // for range facets
   min?: number;
@@ -101,6 +105,8 @@ export interface SearchResult {
   // Merchant-defined one-click filter shortcuts, so the storefront can render
   // them without a second request.
   presets?: { label: string; params: string }[];
+  // Merchant promotional banners for this search term ("top" or in the grid).
+  banners?: import("./features").Banner[];
   // Debug/telemetry: which strategy produced the hits.
   strategy: "fulltext" | "fuzzy" | "hybrid" | "browse" | "sku" | "semantic";
   tookMs: number;

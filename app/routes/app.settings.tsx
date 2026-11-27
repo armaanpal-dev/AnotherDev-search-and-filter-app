@@ -1,3 +1,7 @@
+import {
+  connectCountryAvailability,
+  refreshCountryAvailability,
+} from "../lib/markets/country.server";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
@@ -46,6 +50,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     pixelReason: pixel.reason ?? null,
     missingScopes: missingPixelScopes(session.scope),
     requiredScopes: PIXEL_SCOPES,
+    country: {
+      connected: Boolean(shop.storefrontToken),
+      ...(await prisma.countryAvailability.aggregate({
+        where: { shopId: shop.id },
+        _count: { _all: true },
+        _max: { checkedAt: true },
+      }).then((a) => ({ countries: a._count._all, checkedAt: a._max.checkedAt?.toISOString() ?? null }))),
+    },
   };
 };
 
@@ -69,6 +81,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     invalidateShopConfig(shop.id);
     return { ok: true };
+  }
+
+  if (intent === "countryConnect" || intent === "countryRefresh") {
+    try {
+      if (intent === "countryConnect") await connectCountryAvailability(shop.id, admin);
+      // Checking every country can take minutes on a big catalog; do it in the
+      // background and let the page show the result on the next visit.
+      void refreshCountryAvailability(shop.id).catch((e) =>
+        console.error("[country] refresh failed:", e?.message),
+      );
+      return { ok: true, countryStarted: true };
+    } catch (e: any) {
+      return {
+        ok: false,
+        error:
+          (e?.message ?? "Could not connect.") +
+          " Reload the app and approve the new storefront permission, then try again.",
+      };
+    }
   }
 
   if (intent === "pixelOn" || intent === "pixelOff") {
@@ -111,7 +142,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     showOutOfStock: checkbox("showOutOfStock"),
     collectionFilters: checkbox("collectionFilters"),
     showVendor: checkbox("showVendor"),
-    quickAdd: checkbox("quickAdd"),
+    cardAction: field("cardAction"),
+    quickViewSource: field("quickViewSource"),
+    marketPricing: checkbox("marketPricing"),
+    countryAvailability: checkbox("countryAvailability"),
     minChars: numeric("minChars"),
     maxSuggestions: numeric("maxSuggestions"),
     resultsPerPage: numeric("resultsPerPage"),
@@ -119,6 +153,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     gridColumnsMobile: numeric("gridColumnsMobile"),
     fontSize: numeric("fontSize"),
     filterLayout: field("filterLayout"),
+    filterSidebarWidth: numeric("filterSidebarWidth"),
+    filterDrawerWidth: numeric("filterDrawerWidth"),
+    priceFilterStyle: field("priceFilterStyle"),
+    showSingleValueFacets: checkbox("showSingleValueFacets"),
+    scrollOnFilter: checkbox("scrollOnFilter"),
+    facetColumns: numeric("facetColumns"),
+    variantAvailabilityFilter: checkbox("variantAvailabilityFilter"),
+    wishlistGrowth: checkbox("wishlistGrowth"),
+    // Text areas: an empty box is a deliberate "clear", so read them raw.
+    customCss: present("customCss") ? String(f.get("customCss") ?? "") : undefined,
+    customJs: present("customJs") ? String(f.get("customJs") ?? "") : undefined,
     productCards: field("productCards"),
     collectionWidthEnabled: checkbox("collectionWidthEnabled"),
     collectionMaxWidth: numeric("collectionMaxWidth"),
@@ -202,9 +247,9 @@ type TabKey = "search" | "filters" | "cards" | "advanced";
 
 const TABS: { key: TabKey; label: string; blurb: string }[] = [
   { key: "search", label: "Search", blurb: "Behaviour, relevance, panel layout, colours and fonts" },
-  { key: "filters", label: "Filters", blurb: "Collection pages, filter appearance and colour swatches" },
-  { key: "cards", label: "Product cards", blurb: "Grid size, image shape and card appearance" },
-  { key: "advanced", label: "Advanced", blurb: "Indexing, search language and revenue tracking" },
+  { key: "filters", label: "Filters", blurb: "Collection pages, filter appearance, behaviour and colour swatches" },
+  { key: "cards", label: "Product cards", blurb: "Grid size, card appearance, quick view and market pricing" },
+  { key: "advanced", label: "Advanced", blurb: "Indexing, search language, revenue tracking, integrations and custom code" },
 ];
 
 const PREVIEW_HEADING: Record<TabKey, string> = {
@@ -336,8 +381,10 @@ export default function SettingsPage() {
     pixelReason,
     missingScopes,
     requiredScopes,
+    country,
   } =
     useLoaderData<typeof loader>();
+  const countryFetcher = useFetcher<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const pixelFetcher = useFetcher<typeof action>();
   const s = settings;
@@ -423,7 +470,7 @@ export default function SettingsPage() {
           <Live label="Search page" on={s.searchTakeover} />
           <Live label="Collection filters" on={s.collectionFilters} />
           <Live label="Typo tolerance" on={s.typoTolerance} />
-          <Live label="Quick add to cart" on={s.quickAdd} />
+          <Live label={s.cardAction === "quick_view" ? "Quick view" : "Quick add to cart"} on={s.cardAction !== "none"} />
           <Live label="Revenue tracking" on={pixel === "active"} />
         </s-grid>
         <s-text color="subdued">Storefront: {domain}</s-text>
@@ -514,7 +561,57 @@ export default function SettingsPage() {
               <s-number-field name="gridColumnsMobile" label="Cards per row on mobile" min={1} max={4} defaultValue={String(s.gridColumnsMobile)} />
             </s-grid>
             <Check name="showVendor" checked={s.showVendor} label="Show the brand name on result cards" />
-            <Check name="quickAdd" checked={s.quickAdd} label="Add to cart directly from results (single-variant products)" />
+            <s-select
+              name="cardAction"
+              label="Button on result cards"
+              value={s.cardAction}
+              details="Quick view opens a pop-up with options, quantity and add to cart. Quick add adds single-variant products straight to the cart."
+            >
+              <s-option value="quick_add">Quick add to cart</s-option>
+              <s-option value="quick_view">Quick view</s-option>
+              <s-option value="none">No button, link to the product</s-option>
+            </s-select>
+            <s-select name="quickViewSource" label="Quick view style" value={s.quickViewSource}>
+              <s-option value="app">This app’s quick view</s-option>
+              <s-option value="theme">My theme’s quick view when available (Dawn, Prestige 10.11)</s-option>
+            </s-select>
+            <Check
+              name="marketPricing"
+              checked={s.marketPricing}
+              label="Show each shopper their own market's prices and stock (Shopify Markets)"
+            />
+            <Check
+              name="countryAvailability"
+              checked={s.countryAvailability}
+              label="Hide products that can't be bought in the shopper's country"
+            />
+            <s-stack direction="inline" gap="small-300" alignItems="center">
+              <s-button
+                type="button"
+                variant="secondary"
+                {...(countryFetcher.state !== "idle" ? { loading: true } : {})}
+                onClick={() =>
+                  countryFetcher.submit(
+                    { intent: country.connected ? "countryRefresh" : "countryConnect" },
+                    { method: "post" },
+                  )
+                }
+              >
+                {country.connected ? "Re-check countries now" : "Connect country availability"}
+              </s-button>
+              <s-text color="subdued">
+                {countryFetcher.data && "countryStarted" in countryFetcher.data
+                  ? "Checking every country in the background. This can take a few minutes."
+                  : country.connected
+                    ? country.checkedAt
+                      ? `${country.countries} countries checked, last ${new Date(country.checkedAt).toLocaleString()}. Re-checked nightly.`
+                      : "Connected. The first check is running."
+                    : "Not connected. Needed before hiding works."}
+              </s-text>
+            </s-stack>
+            {countryFetcher.data && "error" in countryFetcher.data && countryFetcher.data.error && (
+              <s-banner tone="critical">{countryFetcher.data.error}</s-banner>
+            )}
           </s-stack>
         </s-section>
 
@@ -842,6 +939,34 @@ export default function SettingsPage() {
         </Panel>
 
         <Panel show={tab === "filters"}>
+        <s-section heading="Filter behaviour">
+          <s-stack direction="block" gap="base">
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <s-number-field name="filterSidebarWidth" label="Sidebar width (px)" min={160} max={420} defaultValue={String(s.filterSidebarWidth)} />
+              <s-number-field name="filterDrawerWidth" label="Drawer width on mobile (px)" min={260} max={560} defaultValue={String(s.filterDrawerWidth)} />
+            </s-grid>
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+              <s-select name="priceFilterStyle" label="Price filter" value={s.priceFilterStyle}>
+                <s-option value="both">Slider and min/max boxes</s-option>
+                <s-option value="slider">Slider only</s-option>
+                <s-option value="inputs">Min/max boxes only</s-option>
+              </s-select>
+              <s-number-field name="facetColumns" label="Options per row" min={0} max={6} defaultValue={String(s.facetColumns)} details="0 = one per line. Useful for sizes." />
+            </s-grid>
+            <Check name="showSingleValueFacets" checked={s.showSingleValueFacets} label="Show a filter even when it has only one option" />
+            <Check name="scrollOnFilter" checked={s.scrollOnFilter} label="Scroll back to the top of the products when a filter changes" />
+            <Check
+              name="variantAvailabilityFilter"
+              checked={s.variantAvailabilityFilter}
+              label="When a size or colour is selected, only show products where that variant is in stock"
+            />
+            <s-text color="subdued">
+              Active filters always show as removable chips above the products, and a
+              shopper’s chosen sort always wins over pinned products.
+            </s-text>
+          </s-stack>
+        </s-section>
+
         <s-section heading="Colour swatches">
           <s-paragraph>
             <s-text color="subdued">
@@ -861,6 +986,41 @@ export default function SettingsPage() {
         </Panel>
 
         <Panel show={tab === "advanced"}>
+        <s-section heading="Integrations">
+          <s-stack direction="block" gap="base">
+            <Check
+              name="wishlistGrowth"
+              checked={s.wishlistGrowth}
+              label="Wishlist Growth: show its heart button on result cards"
+            />
+            <s-text color="subdued">
+              Needs the <s-link href="https://apps.shopify.com/wishlist-growth-new" target="_blank">Wishlist Growth</s-link> app
+              installed and its embed enabled. The button appears only where that app is running.
+            </s-text>
+          </s-stack>
+        </s-section>
+
+        <s-section heading="Custom code">
+          <s-stack direction="block" gap="base">
+            <input type="hidden" name="_present.customCss" value="1" />
+            <input type="hidden" name="_present.customJs" value="1" />
+            <s-text-area
+              name="customCss"
+              label="Custom CSS"
+              rows={6}
+              defaultValue={s.customCss}
+              placeholder={".adsf-card__title { text-transform: uppercase; }"}
+            />
+            <s-text-area
+              name="customJs"
+              label="Custom JavaScript"
+              rows={6}
+              defaultValue={s.customJs}
+              details="Runs once on every storefront page after the app loads. A mistake here can break your storefront, so test on a preview theme first."
+            />
+          </s-stack>
+        </s-section>
+
         <s-section heading="Keeping the index current">
           <s-stack direction="block" gap="base">
             <Check
@@ -1332,7 +1492,7 @@ function WidgetPreview({
                 >
                   £00.00
                 </div>
-                {p.quickAdd && !themeCards && (
+                {p.cardAction !== "none" && !themeCards && (
                   <div
                     style={{
                       marginTop: 6,
@@ -1345,7 +1505,7 @@ function WidgetPreview({
                       display: p.cardButtonFullWidth ? "block" : "inline-block",
                     }}
                   >
-                    {p.cardButtonLabel}
+                    {p.cardAction === "quick_view" ? "Quick view" : p.cardButtonLabel}
                   </div>
                 )}
               </div>

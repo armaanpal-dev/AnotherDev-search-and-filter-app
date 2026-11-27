@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -8,6 +8,8 @@ import { getShopByDomain, ensureShop } from "../lib/shop.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { Row, Empty, useSaveToast } from "../components/ui";
+import { parseQueryList } from "../lib/search/features";
+import { exportRulesCsv, parseRulesCsv } from "../lib/merch/csv";
 
 const ids = (v: FormDataEntryValue | null) =>
   String(v || "")
@@ -60,7 +62,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return "active" as const;
   };
 
+  // Titles and thumbnails for every product a rule references, so the editor
+  // shows products instead of bare ids.
+  const referenced = [
+    ...new Set(
+      rules.flatMap((r) => [
+        ...r.pinnedProductIds,
+        ...r.boostedProductIds,
+        ...r.buriedProductIds,
+        ...r.hiddenProductIds,
+      ]),
+    ),
+  ].slice(0, 5000);
+  const products = referenced.length
+    ? await prisma.product.findMany({
+        where: { shopId: shop.id, productId: { in: referenced } },
+        select: { productId: true, title: true, imageUrl: true },
+      })
+    : [];
+
   return {
+    productInfo: Object.fromEntries(
+      products.map((p) => [p.productId, { title: p.title, imageUrl: p.imageUrl }]),
+    ),
     rules: rules.map((r) => ({
       ...r,
       status: statusOf(r),
@@ -145,19 +169,43 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       data: { active: form.get("active") === "true" },
     });
   } else if (intent === "createRedirect") {
-    const query = String(form.get("query") || "").trim().toLowerCase();
+    // Several terms can share one target ("sale, offers, discount").
+    const queries = parseQueryList(form.get("query"));
     const url = String(form.get("url") || "").trim();
     // Only same-origin paths. An absolute URL here would turn the merchant's own
     // search box into an open redirect for anyone who can guess the term.
-    if (query && url.startsWith("/") && !url.startsWith("//")) {
-      await prisma.redirect.upsert({
-        where: { shopId_query: { shopId: shop.id, query } },
-        create: { shopId: shop.id, query, url },
-        update: { url, active: true },
-      });
-    } else if (query && url) {
+    if (queries.length && url.startsWith("/") && !url.startsWith("//")) {
+      await prisma.$transaction(
+        queries.map((query) =>
+          prisma.redirect.upsert({
+            where: { shopId_query: { shopId: shop.id, query } },
+            create: { shopId: shop.id, query, url },
+            update: { url, active: true },
+          }),
+        ),
+      );
+    } else if (queries.length && url) {
       return { error: "Redirect targets must be a path on your store, e.g. /collections/sale" };
     }
+  } else if (intent === "importRules") {
+    const parsed = parseRulesCsv(String(form.get("csv") || "").slice(0, 2_000_000));
+    const errors = parsed.errors;
+    // Search loads at most 500 rules per shop (config.server.ts); importing past
+    // that would create rules that silently never apply.
+    const existing = await prisma.merchandisingRule.count({ where: { shopId: shop.id } });
+    const room = Math.max(0, 500 - existing);
+    const rows = parsed.rows.slice(0, room);
+    if (parsed.rows.length > room) {
+      errors.push(`${parsed.rows.length - room} row(s) not imported: a store can have at most 500 rules.`);
+    }
+    if (rows.length) {
+      await prisma.merchandisingRule.createMany({ data: rows.map((r) => ({ shopId: shop.id, ...r })) });
+    }
+    invalidateShopConfig(shop.id);
+    if (errors.length) {
+      return { error: `Imported ${rows.length} rule(s). ${errors.length} row(s) skipped: ${errors.slice(0, 5).join(" ")}` };
+    }
+    return { ok: true, imported: rows.length };
   } else if (intent === "deleteRedirect") {
     await prisma.redirect.deleteMany({ where: { id: String(form.get("id")), shopId: shop.id } });
   }
@@ -193,7 +241,7 @@ function parseConditionsForm(form: FormData) {
 type LoadedRule = ReturnType<typeof useLoaderData<typeof loader>>["rules"][number];
 
 export default function MerchandisingPage() {
-  const { rules, redirects, isPro, optionNames } = useLoaderData<typeof loader>();
+  const { rules, redirects, isPro, optionNames, productInfo } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   useSaveToast(fetcher, "Merchandising saved");
   const [sp] = useSearchParams();
@@ -225,6 +273,7 @@ export default function MerchandisingPage() {
   const experimentRunning = rules.some((r) => r.active && r.variant !== "all");
 
   return (
+    <ProductInfoContext.Provider value={productInfo}>
     <s-page heading="Merchandising">
       {error && <s-banner tone="critical">{error}</s-banner>}
       {experimentRunning && (
@@ -322,6 +371,44 @@ export default function MerchandisingPage() {
         </fetcher.Form>
       </s-section>
 
+      <s-section heading="Import and export">
+        <s-paragraph>
+          <s-text color="subdued">
+            Move rules between stores or edit many at once in a spreadsheet. Columns:
+            name, trigger_query, trigger_collection, pinned, boosted, buried, hidden
+            (space-separated product ids), priority, active.
+          </s-text>
+        </s-paragraph>
+        <s-stack direction="inline" gap="small-300">
+          <s-button
+            variant="secondary"
+            onClick={() => {
+              const blob = new Blob([exportRulesCsv(rules)], { type: "text/csv" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = "merchandising-rules.csv";
+              a.click();
+              URL.revokeObjectURL(a.href);
+            }}
+          >
+            Export CSV
+          </s-button>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <s-text>Import CSV:</s-text>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={async (e) => {
+                const file = e.currentTarget.files?.[0];
+                if (!file) return;
+                fetcher.submit({ intent: "importRules", csv: await file.text() }, { method: "post" });
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </s-stack>
+      </s-section>
+
       <s-section heading="Search redirects">
         <s-paragraph>
           <s-text color="subdued">
@@ -332,7 +419,7 @@ export default function MerchandisingPage() {
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="createRedirect" />
           <s-grid gridTemplateColumns="1fr 1fr auto" gap="base" alignItems="end">
-            <s-text-field name="query" label="When someone searches" defaultValue={sp.get("redirect") ?? ""} />
+            <s-text-field name="query" label="When someone searches" details="Separate several terms with commas" defaultValue={sp.get("redirect") ?? ""} />
             <s-text-field name="url" label="Send them to (a path on your store)" placeholder="/collections/sale" />
             <s-button variant="primary" type="submit">Add redirect</s-button>
           </s-grid>
@@ -368,6 +455,7 @@ export default function MerchandisingPage() {
         </s-paragraph>
       </s-section>
     </s-page>
+    </ProductInfoContext.Provider>
   );
 }
 
@@ -555,6 +643,13 @@ function RuleSummary({ rule }: { rule: LoadedRule }) {
  * page would have to fetch — and crucially the ids are PRESERVED, so editing a
  * rule to change its schedule cannot silently empty its product lists.
  */
+type ProductInfo = Record<string, { title: string; imageUrl: string | null }>;
+const ProductInfoContext = createContext<ProductInfo>({});
+
+/**
+ * Pick products with Shopify's picker, then drag (or use the arrows) to set
+ * their order. Order matters for pins: the first product is shown first.
+ */
 function ProductPicker({
   name,
   label,
@@ -564,9 +659,16 @@ function ProductPicker({
   label: string;
   initial?: string[];
 }) {
-  const [selected, setSelected] = useState<{ id: string; title: string }[]>(
-    initial.map((id) => ({ id, title: `#${id}` })),
+  const info = useContext(ProductInfoContext);
+  type Item = { id: string; title: string; imageUrl: string | null };
+  const [selected, setSelected] = useState<Item[]>(
+    initial.map((id) => ({
+      id,
+      title: info[id]?.title ?? `Product ${id} (not indexed)`,
+      imageUrl: info[id]?.imageUrl ?? null,
+    })),
   );
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
 
   async function pick() {
     const bridge = (globalThis as { shopify?: { resourcePicker?: (o: unknown) => Promise<unknown> } })
@@ -576,33 +678,88 @@ function ProductPicker({
       type: "product",
       multiple: true,
       selectionIds: selected.map((s) => ({ id: `gid://shopify/Product/${s.id}` })),
-    })) as { id: string; title: string }[] | undefined;
+    })) as { id: string; title: string; images?: { originalSrc?: string }[] }[] | undefined;
     if (!picked) return;
-    setSelected(
-      picked.map((p) => ({
+    // Keep the merchant's existing order; append newly picked products.
+    const pickedIds = picked.map((p) => String(p.id).split("/").pop() as string);
+    const kept = selected.filter((s) => pickedIds.includes(s.id));
+    const added = picked
+      .filter((p) => !kept.some((k) => k.id === String(p.id).split("/").pop()))
+      .map((p) => ({
         // The engine stores the numeric part of the GID.
         id: String(p.id).split("/").pop() as string,
         title: p.title,
-      })),
-    );
+        imageUrl: p.images?.[0]?.originalSrc ?? null,
+      }));
+    setSelected([...kept, ...added]);
   }
+
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= selected.length || from === to) return;
+    const next = [...selected];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    setSelected(next);
+  };
 
   return (
     <s-stack direction="block" gap="small">
       <input type="hidden" name={name} value={selected.map((s) => s.id).join(",")} />
       <s-stack direction="inline" gap="base" alignItems="center">
         <s-button type="button" variant="secondary" onClick={pick}>{label}</s-button>
-        <s-text color="subdued">
-          {selected.length
-            ? selected.map((s) => s.title).join(", ")
-            : "none selected"}
-        </s-text>
+        {selected.length === 0 && <s-text color="subdued">none selected</s-text>}
         {selected.length > 0 && (
           <s-button type="button" variant="secondary" onClick={() => setSelected([])}>
             Clear
           </s-button>
         )}
       </s-stack>
+      {selected.length > 0 && (
+        <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 4 }}>
+          {selected.map((item, i) => (
+            <li
+              key={item.id}
+              draggable
+              onDragStart={() => setDragFrom(i)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (dragFrom !== null) move(dragFrom, i);
+                setDragFrom(null);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "4px 8px",
+                border: "1px solid #e3e3e3",
+                borderRadius: 8,
+                background: dragFrom === i ? "#f1f1f1" : "#fff",
+                cursor: "grab",
+              }}
+            >
+              <span aria-hidden style={{ color: "#8a8a8a" }}>⋮⋮</span>
+              <span style={{ width: 20, color: "#616161" }}>{i + 1}</span>
+              {item.imageUrl ? (
+                <img src={item.imageUrl} alt="" width={32} height={32} style={{ objectFit: "cover", borderRadius: 4 }} />
+              ) : (
+                <span style={{ width: 32, height: 32, background: "#f1f1f1", borderRadius: 4 }} />
+              )}
+              <span style={{ flex: 1 }}>{item.title}</span>
+              <s-button type="button" variant="tertiary" accessibilityLabel="Move up" onClick={() => move(i, i - 1)}>↑</s-button>
+              <s-button type="button" variant="tertiary" accessibilityLabel="Move down" onClick={() => move(i, i + 1)}>↓</s-button>
+              <s-button
+                type="button"
+                variant="tertiary"
+                tone="critical"
+                accessibilityLabel={`Remove ${item.title}`}
+                onClick={() => setSelected(selected.filter((_, j) => j !== i))}
+              >
+                ×
+              </s-button>
+            </li>
+          ))}
+        </ol>
+      )}
     </s-stack>
   );
 }

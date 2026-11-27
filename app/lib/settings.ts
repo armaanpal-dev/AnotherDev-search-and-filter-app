@@ -133,6 +133,47 @@ export interface WidgetSettings {
   gridColumnsMobile: number;    // cards per row below 750px
   showVendor: boolean;
   quickAdd: boolean;            // add-to-cart straight from the results grid
+  /**
+   * What the button on a result card does.
+   *   quick_add   add the product straight to the cart (single-variant products)
+   *   quick_view  open a Quick View: variant picker, quantity, add to cart
+   *   none        no button; the card links to the product
+   * Shops saved before this existed derive it from `quickAdd`, so nothing
+   * changes for them until the merchant picks something. `quickAdd` is kept in
+   * step with it for the storefront code that still reads it.
+   */
+  cardAction: "quick_add" | "quick_view" | "none";
+  /** Whose Quick View opens: the app's, or the theme's where it is supported (Dawn, Prestige 10.11). */
+  quickViewSource: "app" | "theme";
+  /** Products shown first when the search box is focused but empty (Shopify ids). */
+  emptySearchProductIds: string[];
+  /** Show prices/availability for the shopper's country (Shopify Markets). */
+  marketPricing: boolean;
+  /** Hide products that cannot be bought in the shopper's country. */
+  countryAvailability: boolean;
+  // ---- Filter display (ported from the source app's filter settings) ----
+  filterSidebarWidth: number;   // px, sidebar layout
+  filterDrawerWidth: number;    // px, drawer / mobile off-canvas
+  priceFilterStyle: "both" | "slider" | "inputs";
+  /** Show a facet even when it has a single value. */
+  showSingleValueFacets: boolean;
+  /** Scroll back to the top of the results when a filter changes. */
+  scrollOnFilter: boolean;
+  /** Fixed number of values per row in list/swatch facets; 0 = one per line. */
+  facetColumns: number;
+  /**
+   * When an option filter (Size M) is selected, only match products whose
+   * matching variant is in stock, not products that merely have the option.
+   */
+  variantAvailabilityFilter: boolean;
+  // ---- Customization ----
+  /** Merchant CSS appended to the storefront (bounded, cannot close the tag). */
+  customCss: string;
+  /** Merchant JavaScript run after the widget loads. */
+  customJs: string;
+  // ---- Integrations ----
+  /** Wishlist Growth heart button on result cards. */
+  wishlistGrowth: boolean;
   // Appearance
   accentColor: string;
   backgroundColor: string;
@@ -203,6 +244,21 @@ export const DEFAULT_SETTINGS: WidgetSettings = {
   gridColumnsMobile: 2,
   showVendor: false,
   quickAdd: false,
+  cardAction: "none",
+  quickViewSource: "app",
+  emptySearchProductIds: [],
+  marketPricing: false,
+  countryAvailability: false,
+  filterSidebarWidth: 240,
+  filterDrawerWidth: 340,
+  priceFilterStyle: "both",
+  showSingleValueFacets: true,
+  scrollOnFilter: false,
+  facetColumns: 0,
+  variantAvailabilityFilter: false,
+  customCss: "",
+  customJs: "",
+  wishlistGrowth: false,
   accentColor: "#111111",
   backgroundColor: "#ffffff",
   textColor: "#1a1a1a",
@@ -277,7 +333,21 @@ export function resolveSettings(stored: unknown): WidgetSettings {
     gridColumns: num(s.gridColumns, DEFAULT_SETTINGS.gridColumns, 2, 5),
     gridColumnsMobile: num(s.gridColumnsMobile, DEFAULT_SETTINGS.gridColumnsMobile, 1, 4),
     showVendor: bool(s.showVendor, DEFAULT_SETTINGS.showVendor),
-    quickAdd: bool(s.quickAdd, DEFAULT_SETTINGS.quickAdd),
+    ...cardActionFields(s),
+    quickViewSource: oneOf(s.quickViewSource, ["app", "theme"], DEFAULT_SETTINGS.quickViewSource),
+    emptySearchProductIds: idList(s.emptySearchProductIds, 24),
+    marketPricing: bool(s.marketPricing, DEFAULT_SETTINGS.marketPricing),
+    countryAvailability: bool(s.countryAvailability, DEFAULT_SETTINGS.countryAvailability),
+    filterSidebarWidth: num(s.filterSidebarWidth, DEFAULT_SETTINGS.filterSidebarWidth, 160, 420),
+    filterDrawerWidth: num(s.filterDrawerWidth, DEFAULT_SETTINGS.filterDrawerWidth, 260, 560),
+    priceFilterStyle: oneOf(s.priceFilterStyle, ["both", "slider", "inputs"], DEFAULT_SETTINGS.priceFilterStyle),
+    showSingleValueFacets: bool(s.showSingleValueFacets, DEFAULT_SETTINGS.showSingleValueFacets),
+    scrollOnFilter: bool(s.scrollOnFilter, DEFAULT_SETTINGS.scrollOnFilter),
+    facetColumns: num(s.facetColumns, DEFAULT_SETTINGS.facetColumns, 0, 6),
+    variantAvailabilityFilter: bool(s.variantAvailabilityFilter, DEFAULT_SETTINGS.variantAvailabilityFilter),
+    customCss: code(s.customCss, 20000).replace(/<\/?style/gi, ""),
+    customJs: code(s.customJs, 20000).replace(/<\/script/gi, ""),
+    wishlistGrowth: bool(s.wishlistGrowth, DEFAULT_SETTINGS.wishlistGrowth),
     accentColor: color(s.accentColor, DEFAULT_SETTINGS.accentColor),
     backgroundColor: color(s.backgroundColor, DEFAULT_SETTINGS.backgroundColor),
     textColor: color(s.textColor, DEFAULT_SETTINGS.textColor),
@@ -307,6 +377,21 @@ export function mergeSettings(
   }
   return resolveSettings({ ...current, ...defined });
 }
+
+function cardActionFields(s: Partial<WidgetSettings>) {
+  const legacy = bool(s.quickAdd, DEFAULT_SETTINGS.quickAdd) ? "quick_add" : "none";
+  const cardAction = oneOf(s.cardAction, ["quick_add", "quick_view", "none"], legacy);
+  return { cardAction, quickAdd: cardAction === "quick_add" };
+}
+
+/** Numeric Shopify ids only, de-duplicated and bounded. */
+function idList(v: unknown, max: number): string[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((x) => String(x).trim()).filter((x) => /^\d{1,20}$/.test(x)))].slice(0, max);
+}
+
+/** Merchant-authored code: a string, bounded in size. */
+const code = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
 
 export const WEIGHTS = ["300", "400", "500", "600", "700"] as const;
 

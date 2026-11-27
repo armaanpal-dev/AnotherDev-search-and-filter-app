@@ -150,7 +150,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-app__sort select { padding: 0.45rem 0.6rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; font: inherit; }
 .adsf-app__filter-toggle { display: none; padding: 0.45rem 0.9rem; border: 1px solid currentColor; border-radius: var(--adsf-card-radius, 0); background: transparent; color: inherit; cursor: pointer; font: inherit; }
 
-.adsf-app__body { display: grid; grid-template-columns: 240px 1fr; gap: 1.75rem; align-items: start; }
+.adsf-app__body { display: grid; grid-template-columns: var(--adsf-sidebar-w, 240px) 1fr; gap: 1.75rem; align-items: start; }
 
 /* ---- Sidebar layout on the results page ------------------------------
    The filter column has to start level with the count and the sort control,
@@ -160,7 +160,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
    placed independently. */
 .adsf-app--filters-sidebar {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: var(--adsf-sidebar-w, 240px) minmax(0, 1fr);
   grid-template-rows: auto auto auto;
   gap: 0 1.75rem;
   align-items: start;
@@ -307,7 +307,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
    cards lay out inside the narrower space. */
 .adsf-themegrid__shell {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: var(--adsf-sidebar-w, 240px) minmax(0, 1fr);
   grid-template-rows: auto auto;
   gap: 0 2.5rem; align-items: start;
 }
@@ -528,7 +528,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-app--filters-drawer .adsf-app__body { grid-template-columns: 1fr; }
 .adsf-app--filters-drawer .adsf-app__filter-toggle { display: inline-block; }
 .adsf-app--filters-drawer .adsf-facets {
-  position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: 340px;
+  position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: var(--adsf-drawer-w, 340px);
   z-index: 1200; background: #fff; transform: translateX(-100%);
   transition: transform .25s ease; overflow-y: auto; padding: 1.25rem;
   box-shadow: 2px 0 24px rgba(0,0,0,.2);
@@ -563,7 +563,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
     flex-direction: column; border-bottom: 0; margin-bottom: 0; padding: 0;
   }
   .adsf-facets {
-    position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: 340px; z-index: 1200;
+    position: fixed; top: 0; left: 0; bottom: 0; width: 82%; max-width: var(--adsf-drawer-w, 340px); z-index: 1200;
     background: #fff; transform: translateX(-100%); transition: transform .25s ease; overflow-y: auto; padding: 1.25rem; box-shadow: 2px 0 24px rgba(0,0,0,.2);
   }
   .adsf-facets.is-open { transform: translateX(0); }
@@ -807,7 +807,7 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 @media (max-width: 749px) {
   .adsf-themegrid .adsf-facets {
     position: fixed; top: 0; left: 0; bottom: 0;
-    width: 82%; max-width: 340px; z-index: 1200;
+    width: 82%; max-width: var(--adsf-drawer-w, 340px); z-index: 1200;
     background: #fff; transform: translateX(-100%);
     transition: transform .25s ease; overflow-y: auto; padding: 1.25rem;
     box-shadow: 2px 0 24px rgba(0, 0, 0, .2);
@@ -952,3 +952,80 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .adsf-dropdown__remove { transition: none; }
 }
+
+/* ---- Search banners ------------------------------------------------------ */
+.adsf-banners { display: grid; gap: 12px; margin: 0 0 16px; }
+.adsf-banner {
+  display: flex; align-items: center; gap: 16px; overflow: hidden;
+  border-radius: var(--adsf-card-radius, 8px); text-decoration: none;
+}
+.adsf-banner img { display: block; max-width: 100%; height: auto; }
+.adsf-banner--top img { width: 100%; }
+.adsf-banner--top:has(.adsf-banner__text) img { width: auto; max-width: 50%; }
+.adsf-banner__text { padding: 16px; display: grid; gap: 6px; }
+.adsf-banner__heading { font-size: 1.15em; }
+.adsf-banner__content { margin: 0; opacity: .85; }
+.adsf-banner__button {
+  justify-self: start; padding: 6px 14px; border-radius: 999px;
+  border: 1px solid currentColor; font-weight: 600; font-size: .9em;
+}
+.adsf-banner--grid { flex-direction: column; align-items: stretch; justify-content: center; }
+.adsf-banner--grid img { width: 100%; object-fit: cover; }
+
+/* ---- Quick View ---------------------------------------------------------- */
+.adsf-qv-open { overflow: hidden; }
+.adsf-qv { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; }
+.adsf-qv__backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); }
+.adsf-qv__panel {
+  position: relative; width: min(880px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  overflow: auto; background: var(--adsf-dd-bg, #fff); color: inherit;
+  border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+}
+.adsf-qv__close {
+  position: absolute; top: 8px; right: 8px; z-index: 1; width: 36px; height: 36px;
+  border: 0; border-radius: 50%; background: rgba(255, 255, 255, .9); font-size: 22px; cursor: pointer;
+}
+.adsf-qv__body { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px; }
+.adsf-qv__media img { width: 100%; height: auto; display: block; border-radius: 8px; }
+.adsf-qv__info { display: flex; flex-direction: column; gap: 12px; }
+.adsf-qv__title { margin: 0; font-size: 1.3em; }
+.adsf-qv__price { font-weight: 600; font-size: 1.1em; }
+.adsf-qv__price s { opacity: .55; font-weight: 400; margin-left: 6px; }
+.adsf-qv__opt { display: grid; gap: 4px; font-size: .9em; }
+.adsf-qv__opt select, .adsf-qv__opt input {
+  padding: 8px 10px; border: 1px solid rgba(0, 0, 0, .2); border-radius: 6px; font: inherit; background: #fff;
+}
+.adsf-qv__opt input { max-width: 100px; }
+.adsf-qv__more { font-size: .9em; color: inherit; }
+.adsf-card__add:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 749px) {
+  .adsf-qv { place-items: end center; }
+  .adsf-qv__panel { width: 100vw; border-radius: 12px 12px 0 0; max-height: 90vh; }
+  .adsf-qv__body { grid-template-columns: 1fr; padding: 16px; }
+}
+
+/* ---- Filter display options --------------------------------------------- */
+/* "Options per row": only when the merchant set it; otherwise the list keeps
+   its original one-per-line column. */
+.adsf-has-facet-cols .adsf-facet__list {
+  display: grid; grid-template-columns: repeat(var(--adsf-facet-cols), minmax(0, 1fr));
+}
+.adsf-facet--button .adsf-facet__list,
+.adsf-has-facet-cols .adsf-facet--button .adsf-facet__list {
+  display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px;
+}
+.adsf-facet__item--button input { position: absolute; opacity: 0; pointer-events: none; }
+.adsf-facet__item--button label {
+  display: inline-flex; gap: 4px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid currentColor; border-radius: var(--adsf-filter-radius, 999px);
+  background: var(--adsf-filter-bg, transparent); color: var(--adsf-filter-text, inherit);
+}
+.adsf-facet__item--button input:checked + label {
+  background: var(--adsf-filter-active-bg, #111); color: var(--adsf-filter-active-text, #fff);
+  border-color: var(--adsf-filter-active-bg, #111);
+}
+.adsf-facet__item--button input:focus-visible + label { outline: 2px solid var(--adsf-accent, #111); outline-offset: 2px; }
+.adsf-facet__select { width: 100%; padding: 8px 10px; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; font: inherit; background: #fff; }
+.adsf-card { position: relative; }
+.adsf-wishlist { position: absolute; top: 10px; right: 10px; z-index: 2; }
+.adsf-wishlist button { background: transparent; border: 0; padding: 0; cursor: pointer; display: flex; color: #121212; }

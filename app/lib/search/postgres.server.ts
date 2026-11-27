@@ -1,6 +1,43 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../../db.server";
-import { getShopConfig, facetCache, type MerchCondition, type MerchRule } from "./config.server";
+import {
+  getShopConfig,
+  facetCache,
+  DEFAULT_FILTERS,
+  type MerchCondition,
+  type MerchRule,
+} from "./config.server";
+import {
+  expandMergedSelection,
+  facetSourcesFor,
+  isSizeSource,
+  isSuggestionBlocked,
+  sortSizeValues,
+  type MergeRule,
+} from "./features";
+
+/**
+ * SQL that maps a raw facet value to its merged target, or returns it as is.
+ * Returns an identity wrapper when the facet has no merges, so the common case
+ * produces exactly the SQL it did before.
+ */
+function mergedValueExpr(source: string, merges: MergeRule[]) {
+  const relevant = merges.filter((m) => m.source === source && m.sourceValues.length);
+  return (col: Prisma.Sql): Prisma.Sql => {
+    if (!relevant.length) return col;
+    const whens = relevant.map(
+      (m) => Prisma.sql`WHEN ${col} IN (${Prisma.join(m.sourceValues)}) THEN ${m.target}`,
+    );
+    return Prisma.sql`(CASE ${Prisma.join(whens, " ")} ELSE ${col} END)`;
+  };
+}
+
+/** "option:Color" -> "Color", "metafield:material" -> "Material". */
+function labelForSource(source: string): string {
+  const raw = source.includes(":") ? source.slice(source.indexOf(":") + 1) : source;
+  const nice: Record<string, string> = { productType: "Product type", vendor: "Brand", tag: "Tag" };
+  return nice[raw] ?? raw.charAt(0).toUpperCase() + raw.slice(1);
+}
 import {
   normalizeQuery,
   expandSynonyms,
@@ -106,6 +143,7 @@ function buildFilterPredicates(
   filters: FilterSelection,
   price?: { min?: number; max?: number },
   collection?: string,
+  variantAvailability?: boolean,
 ): Map<string, Prisma.Sql> {
   const preds = new Map<string, Prisma.Sql>();
 
@@ -130,9 +168,14 @@ function buildFilterPredicates(
     } else if (source.startsWith("option:")) {
       const opt = source.slice("option:".length);
       // options is { "Color": ["Red","Blue"] }; ?| tests any selected value present.
+      // With variantAvailability, "Size M" means "has an in-stock M", so a
+      // product whose only M is sold out no longer matches.
       preds.set(
         source,
-        Prisma.sql`(p."options" -> ${opt}) ?| ARRAY[${Prisma.join(values)}]::text[]`,
+        variantAvailability
+          ? Prisma.sql`EXISTS (SELECT 1 FROM "ProductVariant" v WHERE v."productId" = p."id"
+              AND v."available" = TRUE AND (v."optionValues" ->> ${opt}) IN (${Prisma.join(values)}))`
+          : Prisma.sql`(p."options" -> ${opt}) ?| ARRAY[${Prisma.join(values)}]::text[]`,
       );
     } else if (source.startsWith("metafield:")) {
       const key = source.slice("metafield:".length);
@@ -307,6 +350,13 @@ export class PostgresSearchEngine implements SearchEngine {
       Prisma.sql`p."status" = 'ACTIVE'`,
       Prisma.sql`p."publishedOnline" = TRUE`,
     ];
+    // Country availability: drop products Shopify says are not for sale in the
+    // shopper's country. Part of `base`, so totals and facets agree.
+    if (q.country && /^[A-Z]{2}$/.test(q.country)) {
+      base.push(Prisma.sql`NOT EXISTS (SELECT 1 FROM "CountryAvailability" ca
+        WHERE ca."shopId" = ${q.shopId} AND ca."country" = ${q.country}
+          AND p."productId" = ANY(ca."unavailable"))`);
+    }
     const availPred: Prisma.Sql | null = q.includeUnavailable
       ? null
       : Prisma.sql`p."available" = TRUE`;
@@ -437,7 +487,13 @@ export class PostgresSearchEngine implements SearchEngine {
     }
 
     // 4. Filter predicates.
-    const filterPreds = buildFilterPredicates(q.filters, q.price, q.collection);
+    // A merged target ("Red") filters by every raw value folded into it.
+    const filterPreds = buildFilterPredicates(
+      expandMergedSelection(q.filters, cfg.merges),
+      q.price,
+      q.collection,
+      q.variantAvailability,
+    );
     const whereOrganic = combine([
       ...base,
       textPred,
@@ -495,6 +551,7 @@ export class PostgresSearchEngine implements SearchEngine {
       filterPreds,
       cfg,
       signature,
+      q.collection,
     );
 
     const [rows, countRows, facets] = await Promise.all([
@@ -533,6 +590,7 @@ export class PostgresSearchEngine implements SearchEngine {
       perPage: q.perPage,
       facets,
       presets: cfg.presets,
+      ...(hasTerm && cfg.banners.has(normalized) ? { banners: cfg.banners.get(normalized) } : {}),
       suggestion,
       strategy,
       tookMs: Date.now() - started,
@@ -587,6 +645,7 @@ export class PostgresSearchEngine implements SearchEngine {
     filterPreds: Map<string, Prisma.Sql>,
     cfg: Awaited<ReturnType<typeof getShopConfig>>,
     signature: string,
+    collection?: string,
   ): Promise<Facet[]> {
     const othersThan = (source: string) =>
       [...filterPreds.entries()]
@@ -603,11 +662,26 @@ export class PostgresSearchEngine implements SearchEngine {
       return combine([...baseNoAvail, textPred, ...othersThan("availability")]);
     };
 
-    const enabled = cfg.filters.filter((f) => f.enabled);
+    // A filter group assigned to this collection replaces the shop's facet set.
+    const groupSources = facetSourcesFor(collection, cfg.filterGroups);
+    const enabled = groupSources
+      ? groupSources.map(
+          (source, position) =>
+            cfg.filters.find((f) => f.source === source) ??
+            DEFAULT_FILTERS.find((f) => f.source === source) ?? {
+              source,
+              label: labelForSource(source),
+              displayAs: "checkbox" as const,
+              position,
+              enabled: true,
+            },
+        )
+      : cfg.filters.filter((f) => f.enabled);
+    const groupKey = groupSources ? `g:${groupSources.join(",")}|` : "";
 
     const built = await Promise.all(
       enabled.map((fc) =>
-        facetCache.wrap(`${signature}|${fc.source}`, async (): Promise<Facet | null> => {
+        facetCache.wrap(`${signature}|${groupKey}${fc.source}`, async (): Promise<Facet | null> => {
           if (fc.source === "price") {
             const rows = await prisma.$queryRaw<{ min: number | null; max: number | null }[]>(
               Prisma.sql`SELECT MIN(p."priceMin") AS min, MAX(p."priceMax") AS max
@@ -648,20 +722,24 @@ export class PostgresSearchEngine implements SearchEngine {
 
           const where = whereExcept(fc.source);
           let rows: { value: string; count: bigint }[] = [];
+          // Merged values ("Crimson", "red" -> "Red") are folded BEFORE grouping
+          // and counted with COUNT(DISTINCT): a product carrying two folded values
+          // is one product, so the count matches what clicking it returns.
+          const merged = mergedValueExpr(fc.source, cfg.merges);
 
           if (fc.source === "vendor") {
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT p."vendor" AS value, COUNT(*)::bigint AS count FROM "Product" p
-              WHERE ${where} AND p."vendor" <> '' GROUP BY p."vendor" ORDER BY count DESC LIMIT 50`);
+              SELECT ${merged(Prisma.sql`p."vendor"`)} AS value, COUNT(DISTINCT p."id")::bigint AS count FROM "Product" p
+              WHERE ${where} AND p."vendor" <> '' GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source === "productType") {
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT p."productType" AS value, COUNT(*)::bigint AS count FROM "Product" p
-              WHERE ${where} AND p."productType" <> '' GROUP BY p."productType" ORDER BY count DESC LIMIT 50`);
+              SELECT ${merged(Prisma.sql`p."productType"`)} AS value, COUNT(DISTINCT p."id")::bigint AS count FROM "Product" p
+              WHERE ${where} AND p."productType" <> '' GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source === "tag") {
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT tag AS value, COUNT(*)::bigint AS count
+              SELECT ${merged(Prisma.sql`tag`)} AS value, COUNT(DISTINCT p."id")::bigint AS count
               FROM "Product" p, unnest(p."tags") AS tag
-              WHERE ${where} GROUP BY tag ORDER BY count DESC LIMIT 50`);
+              WHERE ${where} GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source === "collection") {
             rows = await prisma.$queryRaw(Prisma.sql`
               SELECT handle AS value, COUNT(*)::bigint AS count
@@ -670,15 +748,15 @@ export class PostgresSearchEngine implements SearchEngine {
           } else if (fc.source.startsWith("option:")) {
             const opt = fc.source.slice("option:".length);
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT val AS value, COUNT(*)::bigint AS count
+              SELECT ${merged(Prisma.sql`val`)} AS value, COUNT(DISTINCT p."id")::bigint AS count
               FROM "Product" p, jsonb_array_elements_text(COALESCE(p."options" -> ${opt}, '[]'::jsonb)) AS val
-              WHERE ${where} GROUP BY val ORDER BY count DESC LIMIT 50`);
+              WHERE ${where} GROUP BY 1 ORDER BY count DESC LIMIT 50`);
           } else if (fc.source.startsWith("metafield:")) {
             // Metafield facets were configurable but never counted, so the facet
             // simply never appeared. Aggregate over the mirrored metafield map.
             const key = fc.source.slice("metafield:".length);
             rows = await prisma.$queryRaw(Prisma.sql`
-              SELECT p."metafields" ->> ${key} AS value, COUNT(*)::bigint AS count
+              SELECT ${merged(Prisma.sql`(p."metafields" ->> ${key})`)} AS value, COUNT(DISTINCT p."id")::bigint AS count
               FROM "Product" p
               WHERE ${where} AND COALESCE(p."metafields" ->> ${key}, '') <> ''
               GROUP BY 1 ORDER BY count DESC LIMIT 50`);
@@ -692,7 +770,7 @@ export class PostgresSearchEngine implements SearchEngine {
               ? (v: string) => cfg.collectionTitles.get(v) ?? v
               : (v: string) => v;
 
-          const values: FacetValue[] = rows.map((r) => {
+          let values: FacetValue[] = rows.map((r) => {
             const swatch = cfg.swatches.get(String(r.value).toLowerCase());
             return {
               value: r.value,
@@ -701,6 +779,11 @@ export class PostgresSearchEngine implements SearchEngine {
               ...(swatch ? { swatch } : {}),
             };
           });
+          if (isSizeSource(fc.source)) {
+            const order = sortSizeValues(values.map((v) => v.value), cfg.sizeRanks);
+            const byValue = new Map(values.map((v) => [v.value, v]));
+            values = order.map((v) => byValue.get(v)!);
+          }
 
           return {
             source: fc.source,
@@ -763,7 +846,7 @@ export class PostgresSearchEngine implements SearchEngine {
     const fuzzy = q.typoTolerance !== false;
     // Empty query → recommendations (popular products, collections, trending searches).
     if (!normalized) {
-      return this.recommendations(q.shopId, q.limit, q.includeUnavailable);
+      return this.recommendations(q.shopId, q.limit, q.includeUnavailable, cfg);
     }
 
     // A redirect configured for this term should fire from the dropdown too,
@@ -841,7 +924,9 @@ export class PostgresSearchEngine implements SearchEngine {
 
     return {
       products: rows.map((r) => rowToHit(r)),
-      suggestions: sugg.map((s) => s.normalized).filter((s) => s !== normalized),
+      suggestions: sugg
+        .map((s) => s.normalized)
+        .filter((s) => s !== normalized && !isSuggestionBlocked(s, cfg.blacklist)),
       collections: collRows.map((c) => ({
         handle: c.handle,
         title: c.title,
@@ -896,10 +981,17 @@ export class PostgresSearchEngine implements SearchEngine {
     shopId: string,
     limit: number,
     includeUnavailable?: boolean,
+    cfg?: Awaited<ReturnType<typeof getShopConfig>>,
   ): Promise<AutocompleteResult> {
     const availPred = includeUnavailable
       ? Prisma.sql`TRUE`
       : Prisma.sql`p."available" = TRUE`;
+
+    // Merchant-chosen empty-search products come first, in their order.
+    const pinnedIds = cfg?.settings.emptySearchProductIds ?? [];
+    const pinOrder = pinnedIds.length
+      ? Prisma.sql`array_position(ARRAY[${Prisma.join(pinnedIds)}]::text[], p."productId") ASC NULLS LAST,`
+      : Prisma.sql``;
 
     const [prodRows, collRows, trending] = await Promise.all([
       // Popular / recent products.
@@ -908,7 +1000,7 @@ export class PostgresSearchEngine implements SearchEngine {
         FROM "Product" p
         WHERE p."shopId" = ${shopId} AND p."status" = 'ACTIVE'
           AND p."publishedOnline" = TRUE AND ${availPred}
-        ORDER BY p."popularity" DESC, p."publishedAt" DESC NULLS LAST
+        ORDER BY ${pinOrder} p."popularity" DESC, p."publishedAt" DESC NULLS LAST
         LIMIT ${limit}`),
       // Biggest collections.
       prisma.$queryRaw<any[]>(Prisma.sql`
@@ -925,7 +1017,9 @@ export class PostgresSearchEngine implements SearchEngine {
 
     return {
       products: prodRows.map((r) => rowToHit(r)),
-      suggestions: trending.map((t) => t.normalized),
+      suggestions: trending
+        .map((t) => t.normalized)
+        .filter((t) => !cfg || !isSuggestionBlocked(t, cfg.blacklist)),
       collections: collRows.map((c) => ({
         handle: c.handle,
         title: c.title,
@@ -1110,6 +1204,9 @@ function facetSignature(
     // computed over, so a shop that has it on must not share counts with the
     // same query served while the embeddings provider was unreachable.
     q.semantic === false ? "0" : "1",
+    // Both change which products the facets are counted over.
+    q.country ?? "",
+    q.variantAvailability ? "va" : "",
     filters,
     price,
     ruleKey,
