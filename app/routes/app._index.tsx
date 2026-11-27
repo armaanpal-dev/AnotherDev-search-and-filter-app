@@ -13,6 +13,7 @@ import { DEFAULT_PROXY_BASE } from "../lib/proxy.server";
 // This page used to define its own Stat, Card and column templates alongside
 // them, which is exactly the drift they were introduced to prevent.
 import { Stat, Card, TILES, CARDS, useSaveToast } from "../components/ui";
+import { BrandHero, BrandIcon, ColorStat, Progress } from "../components/brand";
 import { ModeCard } from "../components/mode";
 import { resolveSettings, mergeSettings } from "../lib/settings";
 import { getSearchActivity } from "../lib/analytics.server";
@@ -170,13 +171,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // from the plan table's reality: merchandising is sold from Growth up, and
 // badging it "Pro" told Growth merchants they could not use what they had paid
 // for.
-const PAGES: { href: string; title: string; blurb: string; badge?: string }[] = [
-  { href: "/app/filters", title: "Filters", blurb: "Which filters shoppers see, groups per collection, merged values." },
-  { href: "/app/search", title: "Search", blurb: "Banners, synonyms, redirects, blocked suggestions, test search." },
-  { href: "/app/collections", title: "Collections", blurb: "Pin, boost and bury products on collection pages.", badge: "Growth" },
-  { href: "/app/analytics", title: "Analytics", blurb: "Top terms, dead ends, filters used, revenue." },
-  { href: "/app/settings", title: "Settings", blurb: "Theme setup, index, look and behaviour, integrations." },
-  { href: "/app/plans", title: "Plans", blurb: "Free to 100 products. Pro for the rest." },
+const PAGES: { href: string; title: string; blurb: string; icon: string; badge?: string }[] = [
+  { href: "/app/filters", title: "Filters", blurb: "Which filters shoppers see, groups per collection, merged values.", icon: "filter" },
+  { href: "/app/search", title: "Search", blurb: "Pinning, banners, synonyms, redirects, blocked suggestions.", icon: "search" },
+  { href: "/app/collections", title: "Collections", blurb: "Pin, boost and bury products on collection pages.", icon: "collection-list", badge: "Growth" },
+  { href: "/app/analytics", title: "Analytics", blurb: "Top terms, dead ends, filters used, revenue.", icon: "chart-vertical" },
+  { href: "/app/settings", title: "Settings", blurb: "Theme setup, index, look and behaviour, integrations.", icon: "settings" },
+  { href: "/app/plans", title: "Plans", blurb: "Free to 100 products. Pro for the rest.", icon: "credit-card" },
 ];
 
 export default function Dashboard() {
@@ -190,10 +191,33 @@ export default function Dashboard() {
       : "—";
 
   return (
-    <s-page heading="AnotherDev Search and Filters">
+    <s-page heading="Dashboard">
       <s-button slot="primary-action" href="/app/sync" variant="primary">
         {d.synced ? "Manage index" : "Run first sync"}
       </s-button>
+
+      <s-section padding="none">
+        <BrandHero
+          title="AnotherDev Search & Filters"
+          subtitle={
+            d.synced
+              ? `${d.productCount.toLocaleString()} products searchable · ${d.searches7d.toLocaleString()} searches in the last 7 days`
+              : "Sync your catalog to start serving search and filters."
+          }
+          chips={[
+            { label: d.synced ? "Catalog indexed" : "Catalog not indexed", ok: d.synced },
+            { label: d.embedActivated ? "Live on your theme" : "Theme embed off", ok: d.embedActivated },
+            { label: `${PLAN_LIMITS[d.plan].name} plan`, ok: true },
+          ]}
+          action={
+            d.synced && d.embedActivated
+              ? { label: "View analytics", href: "/app/analytics" }
+              : d.synced
+                ? { label: "Set up your theme", href: "/app/theme-setup" }
+                : { label: "Run first sync", href: "/app/sync" }
+          }
+        />
+      </s-section>
 
       <ModeCard mode={d.mode} fetcher={modeFetcher} />
 
@@ -219,32 +243,40 @@ export default function Dashboard() {
 
       <s-section heading="Last 7 days">
         <s-grid gridTemplateColumns={TILES} gap="large-100">
-          <Stat label="Products indexed" value={d.productCount.toLocaleString()} />
-          <Stat label="Searches" value={d.searches7d.toLocaleString()} />
-          <Stat
+          <ColorStat label="Products indexed" value={d.productCount.toLocaleString()} icon="product" accent="violet" href="/app/sync" />
+          <ColorStat label="Searches" value={d.searches7d.toLocaleString()} icon="search" accent="pink" href="/app/analytics" />
+          <ColorStat
             label="Zero results"
             value={d.zeroCount.toLocaleString()}
-            {...(d.zeroCount > 0
-              ? { tone: "critical" as const, hint: "Needs attention", href: "/app/analytics" }
-              : {})}
+            icon="alert-triangle"
+            accent={d.zeroCount > 0 ? "red" : "teal"}
+            hint={d.zeroCount > 0 ? "Needs attention" : "All searches found products"}
+            href="/app/analytics"
           />
-          <Stat label="Click-through" value={`${ctr}%`} />
+          <ColorStat label="Click-through" value={`${ctr}%`} icon="cursor" accent="teal" />
           {/* Only shown once the pixel is installed. A revenue tile reading
               "—" on every store that has not turned it on is a permanently
               broken-looking number; the Search visibility card below is where
               the feature is introduced instead. */}
           {d.pixelActive && (
-            <Stat
+            <ColorStat
               label="Search revenue"
               value={money(d.revenue7d)}
+              icon="cash-dollar"
+              accent="amber"
               href="/app/analytics"
             />
           )}
-          <Stat label="Plan" value={PLAN_LIMITS[d.plan].name} href="/app/plans" />
+          <ColorStat label="Plan" value={PLAN_LIMITS[d.plan].name} icon="credit-card" accent="navy" href="/app/plans" />
         </s-grid>
       </s-section>
 
       <s-section heading="Setup">
+        <Progress
+          label={d.synced && d.embedActivated ? "You're all set" : "Get your store ready"}
+          done={(d.synced ? 1 : 0) + (d.embedActivated ? 1 : 0)}
+          total={2}
+        />
         <s-grid gridTemplateColumns="repeat(12, 1fr)" gap="large-100">
           <s-grid-item gridColumn="span 7">
             <s-stack direction="block" gap="base">
@@ -353,13 +385,16 @@ export default function Dashboard() {
         <s-grid gridTemplateColumns={CARDS} gap="large-100">
           {PAGES.map((p) => (
             <s-clickable key={p.href} href={p.href} padding="base" background="subdued" borderRadius="base">
-              <s-stack direction="block" gap="small-500">
-                <s-stack direction="inline" gap="small-500" alignItems="center">
-                  <s-text type="strong">{p.title}</s-text>
-                  {p.badge && <s-badge tone="info">{p.badge}</s-badge>}
+              <s-grid gridTemplateColumns="auto 1fr" gap="base" alignItems="start">
+                <BrandIcon type={p.icon} />
+                <s-stack direction="block" gap="small-500">
+                  <s-stack direction="inline" gap="small-500" alignItems="center">
+                    <s-text type="strong">{p.title}</s-text>
+                    {p.badge && <s-badge tone="info">{p.badge}</s-badge>}
+                  </s-stack>
+                  <s-text color="subdued">{p.blurb}</s-text>
                 </s-stack>
-                <s-text color="subdued">{p.blurb}</s-text>
-              </s-stack>
+              </s-grid>
             </s-clickable>
           ))}
         </s-grid>

@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
+import { useLoaderData, useFetcher, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -149,6 +149,15 @@ function BannerFields({ b }: { b?: Banner }) {
 
 export default function SearchToolsPage() {
   const { banners, blacklist, emptySearch } = useLoaderData<typeof loader>();
+  // ?view=banners|blacklist|empty opens one tool on its own (from the Search hub).
+  const [sp] = useSearchParams();
+  const view = sp.get("view");
+  const show = (v: string) => !view || view === v;
+  const heading =
+    view === "banners" ? "Search banners"
+    : view === "blacklist" ? "Blocked suggestions"
+    : view === "empty" ? "Empty search products"
+    : "Search tools";
   const fetcher = useFetcher<typeof action>();
   useSaveToast(fetcher, "Saved");
   const data = fetcher.data;
@@ -170,10 +179,11 @@ export default function SearchToolsPage() {
   };
 
   return (
-    <s-page heading="Search tools">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
+    <s-page heading={heading}>
+      <s-link slot="breadcrumb-actions" href="/app/search">Search</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
 
+      {show("banners") && (
       <s-section heading="Search banners">
         <s-paragraph>
           <s-text color="subdued">
@@ -232,7 +242,9 @@ export default function SearchToolsPage() {
           <Empty heading="No banners yet">Add one above for your most-searched term.</Empty>
         )}
       </s-section>
+      )}
 
+      {show("blacklist") && (
       <s-section heading="Blocked suggestions">
         <s-paragraph>
           <s-text color="subdued">
@@ -285,7 +297,9 @@ export default function SearchToolsPage() {
           <Empty heading="Nothing blocked">Every suggestion that found products can be offered.</Empty>
         )}
       </s-section>
+      )}
 
+      {show("empty") && (
       <s-section heading="Empty search products">
         <s-paragraph>
           <s-text color="subdued">
@@ -313,6 +327,7 @@ export default function SearchToolsPage() {
           )}
         </s-stack>
       </s-section>
+      )}
 
       <s-section slot="aside" heading="Related">
         <s-paragraph>

@@ -110,7 +110,7 @@ export default function SynonymsPage() {
 
   return (
     <s-page heading="Synonyms">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/search">Search</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
       <s-section heading="Overview">
         <s-grid gridTemplateColumns={TILES} gap="large-100">

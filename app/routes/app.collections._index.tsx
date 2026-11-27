@@ -9,7 +9,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 const ITEMS: HubItem[] = [
-  { href: "/app/merchandising", title: "Merchandising and pinning", blurb: "Pin products to the top of a collection, boost or bury by tag, brand or stock, and schedule it.", icon: "pin", badge: "Growth" },
+  { href: "/app/merchandising?view=rules&scope=collection", title: "Merchandising", blurb: "Boost, bury or hide products on a collection by tag, brand, type or stock. Schedule and A/B test.", icon: "arrow-up", badge: "Growth" },
+  { href: "/app/merchandising?view=pinning&scope=collection", title: "Product pinning", blurb: "Pin chosen products to the top of a collection, in your order.", icon: "pin", badge: "Growth" },
   { href: "/app/filter-tools", title: "Collection filter groups", blurb: "Give specific collections their own filters, e.g. Size and Width on Shoes.", icon: "collection-list" },
   { href: "/app/settings/general?tab=cards", title: "Product cards and quick view", blurb: "Grid size, card look, quick view and market pricing.", icon: "product" },
 ];

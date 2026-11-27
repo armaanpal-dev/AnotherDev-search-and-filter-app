@@ -247,12 +247,34 @@ export default function MerchandisingPage() {
   const [sp] = useSearchParams();
   const [editing, setEditing] = useState<string | null>(null);
   const data = fetcher.data;
+
+  // One page, several focused views, so each hub card opens just its tool:
+  //   ?view=pinning|rules|redirects   ?scope=search|collection
+  // No params shows everything, as before.
+  const view = sp.get("view") as "pinning" | "rules" | "redirects" | null;
+  const scope = sp.get("scope") as "search" | "collection" | null;
+  const parent = scope === "collection" ? { href: "/app/collections", label: "Collections" } : { href: "/app/search", label: "Search" };
+  const where = scope === "collection" ? "collection" : "search";
+  const heading =
+    view === "pinning" ? "Product pinning"
+    : view === "rules" ? "Merchandising rules"
+    : view === "redirects" ? "Page redirects"
+    : "Merchandising";
+  const showRules = view !== "redirects";
+  const showRedirects = !view || view === "redirects";
+  const showImport = !view || view === "rules";
+  const visibleRules = rules.filter((r) => {
+    if (scope === "search" && !r.triggerQuery) return false;
+    if (scope === "collection" && !r.triggerCollection) return false;
+    if (view === "pinning" && !r.pinnedProductIds.length) return false;
+    return true;
+  });
   const error = data && "error" in data ? data.error : null;
 
   if (!isPro) {
     return (
-      <s-page heading="Merchandising">
-        <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
+      <s-page heading={heading}>
+        <s-link slot="breadcrumb-actions" href={parent.href}>{parent.label}</s-link>
         <s-banner tone="info" heading="Merchandising is on the paid plans">
           <s-paragraph>
             Pin products to the top of results, boost or bury by relevance, hide products,
@@ -275,8 +297,8 @@ export default function MerchandisingPage() {
 
   return (
     <ProductInfoContext.Provider value={productInfo}>
-    <s-page heading="Merchandising">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
+    <s-page heading={heading}>
+      <s-link slot="breadcrumb-actions" href={parent.href}>{parent.label}</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
       {experimentRunning && (
         <s-banner tone="info" heading="An A/B test is running">
@@ -288,17 +310,18 @@ export default function MerchandisingPage() {
         </s-banner>
       )}
 
-      <s-section heading="Rules">
+      {showRules && (
+      <s-section heading={view === "pinning" ? `Pinned products by ${where}` : scope ? `${where === "search" ? "Search" : "Collection"} rules` : "Rules"}>
         <s-paragraph>
           <s-text color="subdued">
-            Rules run on the highest priority first. A rule fires when its trigger matches
-            the shopper&rsquo;s search or the collection they&rsquo;re browsing, it is inside
-            its schedule, and the shopper is in its test group.
+            {view === "pinning"
+              ? `Pinned products show first, in your order, whenever the ${where === "search" ? "search term" : "collection"} matches. Add pins with “Pin to top” in a rule.`
+              : "Rules run on the highest priority first. A rule fires when its trigger matches the shopper’s search or the collection they’re browsing, it is inside its schedule, and the shopper is in its test group."}
           </s-text>
         </s-paragraph>
-        {rules.length ? (
+        {visibleRules.length ? (
           <s-stack direction="block" gap="small">
-            {rules.map((r) => (
+            {visibleRules.map((r) => (
               <Row
                 key={r.id}
                 actions={
@@ -354,14 +377,17 @@ export default function MerchandisingPage() {
             ))}
           </s-stack>
         ) : (
-          <Empty heading="No rules yet">
-            Rules change what ranks first for a search. Start from a term in
-            Analytics that returned results nobody clicked.
+          <Empty heading={view === "pinning" ? "Nothing pinned yet" : "No rules yet"}>
+            {where === "collection" && scope
+              ? "Set a collection handle as the trigger below to change that collection’s order."
+              : "Rules change what ranks first for a search. Start from a term in Analytics that returned results nobody clicked."}
           </Empty>
         )}
       </s-section>
+      )}
 
-      <s-section heading="Add a rule">
+      {showRules && (
+      <s-section heading={view === "pinning" ? "Pin products" : "Add a rule"}>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="createRule" />
           <RuleFields
@@ -369,10 +395,12 @@ export default function MerchandisingPage() {
             fieldOptions={fieldOptions}
             defaultQuery={sp.get("query") ?? ""}
           />
-          <s-button variant="primary" type="submit">Create rule</s-button>
+          <s-button variant="primary" type="submit">{view === "pinning" ? "Save pins" : "Create rule"}</s-button>
         </fetcher.Form>
       </s-section>
+      )}
 
+      {showImport && (
       <s-section heading="Import and export">
         <s-paragraph>
           <s-text color="subdued">
@@ -410,7 +438,9 @@ export default function MerchandisingPage() {
           </label>
         </s-stack>
       </s-section>
+      )}
 
+      {showRedirects && (
       <s-section heading="Search redirects">
         <s-paragraph>
           <s-text color="subdued">
@@ -447,6 +477,7 @@ export default function MerchandisingPage() {
         ) : null}
 
       </s-section>
+      )}
 
       <s-section slot="aside" heading="Check your work">
         <s-paragraph>

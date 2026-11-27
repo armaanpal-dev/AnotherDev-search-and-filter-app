@@ -455,7 +455,7 @@ export default function SettingsPage() {
 
   return (
     <s-page heading="Settings">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/settings">Settings</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
       <s-button
         slot="primary-action"
         variant="primary"

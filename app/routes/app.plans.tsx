@@ -142,7 +142,7 @@ export default function PlansPage() {
 
   return (
     <s-page heading="Plans and pricing">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/settings">Settings</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
       {declined && (
         <s-banner tone="warning" heading="The charge was not approved">
           <s-paragraph>

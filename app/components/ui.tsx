@@ -7,6 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
+import { BrandIcon } from "./brand";
 
 /** Responsive column templates. Tiles wrap on their own, without media queries. */
 export const TILES = "repeat(auto-fit, minmax(170px, 1fr))";
@@ -246,9 +247,7 @@ export function Hub({
                 borderRadius="base"
               >
                 <s-grid gridTemplateColumns="auto 1fr" gap="base" alignItems="start">
-                  <s-box padding="small-300" background="strong" borderRadius="base">
-                    <s-icon type={item.icon as any} />
-                  </s-box>
+                  <BrandIcon type={item.icon} />
                   <s-stack direction="block" gap="small-500">
                     <s-stack direction="inline" gap="small-500" alignItems="center">
                       <s-text type="strong">{item.title}</s-text>

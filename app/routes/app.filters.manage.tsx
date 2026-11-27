@@ -210,7 +210,7 @@ export default function FiltersPage() {
 
   return (
     <s-page heading="Filters">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/filters">Filters</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/filters">Filters</s-link>
       {error && <s-banner tone="critical">{error}</s-banner>}
 
       <s-section heading="Overview">

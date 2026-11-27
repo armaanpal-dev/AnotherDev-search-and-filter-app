@@ -85,7 +85,7 @@ export default function SyncPage() {
 
   return (
     <s-page heading="Search index">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/settings">Settings</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
       <s-button
         slot="primary-action"
         variant="primary"

@@ -122,7 +122,7 @@ export default function PreviewPage() {
 
   return (
     <s-page heading="Test search">
-      <s-link slot="breadcrumb-actions" href="C:/Program Files/Git/app/search">Search</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/search">Search</s-link>
       <s-section heading="Try a search">
         {/* A plain GET form: the query lives in the URL, so a merchant can
             bookmark a problem case or paste it to someone else. */}
