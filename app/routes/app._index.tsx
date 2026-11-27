@@ -12,7 +12,7 @@ import { DEFAULT_PROXY_BASE } from "../lib/proxy.server";
 // The shared primitives exist so seven pages cannot drift into seven looks.
 // This page used to define its own Stat, Card and column templates alongside
 // them, which is exactly the drift they were introduced to prevent.
-import { Stat, Card, TILES, CARDS, useSaveToast } from "../components/ui";
+import { Card, TILES, CARDS, useSaveToast } from "../components/ui";
 import { BrandHero, BrandIcon, ColorStat, Progress } from "../components/brand";
 import { ModeCard } from "../components/mode";
 import { resolveSettings, mergeSettings } from "../lib/settings";
@@ -384,7 +384,8 @@ export default function Dashboard() {
       <s-section heading="Pages">
         <s-grid gridTemplateColumns={CARDS} gap="large-100">
           {PAGES.map((p) => (
-            <s-clickable key={p.href} href={p.href} padding="base" background="subdued" borderRadius="base">
+            <div className="adsf-tile" key={p.href}>
+            <s-clickable href={p.href} padding="base" background="subdued" borderRadius="base">
               <s-grid gridTemplateColumns="auto 1fr" gap="base" alignItems="start">
                 <BrandIcon type={p.icon} />
                 <s-stack direction="block" gap="small-500">
@@ -396,6 +397,7 @@ export default function Dashboard() {
                 </s-stack>
               </s-grid>
             </s-clickable>
+            </div>
           ))}
         </s-grid>
       </s-section>

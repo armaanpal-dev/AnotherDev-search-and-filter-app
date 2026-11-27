@@ -8,7 +8,7 @@ import { ensureShop } from "../lib/shop.server";
 import { getPlanStatus } from "../lib/billing.server";
 import { invalidateShopConfig } from "../lib/search/config.server";
 import prisma from "../db.server";
-import { Breadcrumbs, PageLoader } from "../components/chrome";
+import { Breadcrumbs, BrandStyles, PageLoader } from "../components/chrome";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
@@ -45,6 +45,7 @@ export default function App() {
         <s-link href="/app/collections">Collections</s-link>
         <s-link href="/app/settings">Settings</s-link>
       </s-app-nav>
+      <BrandStyles />
       <PageLoader />
       <Breadcrumbs />
       <Outlet />

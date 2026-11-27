@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { Link, useLocation, useNavigation } from "react-router";
 import { trailFor } from "../lib/breadcrumbs";
-import { BRAND } from "./brand";
+import { BRAND, BrandStyles } from "./brand";
 
 /**
  * "Dashboard › Search › Product pinning", each step a client-side link.
@@ -35,7 +35,7 @@ export function Breadcrumbs() {
               </span>
             )}
             {c.href ? (
-              <Link to={c.href} style={{ color: BRAND.violet, textDecoration: "none", fontWeight: 500 }}>
+              <Link to={c.href} className="adsf-crumb" style={{ color: BRAND.violet, textDecoration: "none", fontWeight: 500 }}>
                 {c.label}
               </Link>
             ) : (
@@ -49,6 +49,8 @@ export function Breadcrumbs() {
     </nav>
   );
 }
+
+export { BrandStyles };
 
 /**
  * Shown while a page is loading: a brand-gradient bar across the top of the

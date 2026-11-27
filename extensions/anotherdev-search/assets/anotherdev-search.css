@@ -885,8 +885,9 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   transform: translateY(-4px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
-/* The link clips the image, so a zoom cannot bleed past the corners. */
-.adsf-card-hover-zoom .adsf-card a { overflow: hidden; border-radius: var(--adsf-card-radius, 0); }
+/* The image's own box clips the zoom. Clipping the whole link let the scaled
+   image spill over the title and price. */
+.adsf-card__media { display: block; overflow: hidden; border-radius: var(--adsf-card-radius, 0); }
 .adsf-card-hover-zoom .adsf-card:hover .adsf-card__img { transform: scale(1.06); }
 
 /* Button. Declared after the base rule so these win without !important. */
@@ -899,11 +900,22 @@ body.adsf-collection-active .collection__filters { display: none !important; }
   border-radius: var(--adsf-card-btn-radius, 0);
 }
 .adsf-card__add--full { width: 100%; }
+.adsf-card__add { transition: background-color .15s ease, color .15s ease, filter .15s ease, box-shadow .15s ease; }
+/* A coloured button darkens a touch; brightening white or pale buttons did
+   nothing visible. A transparent button fills with the accent instead. */
 .adsf-card__add:hover:not(:disabled) {
   background: var(--adsf-card-btn-bg, #111);
   color: var(--adsf-card-btn-text, #fff);
-  filter: brightness(1.12);
+  filter: brightness(0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
+.adsf-btn-clear .adsf-card__add:hover:not(:disabled) {
+  background: var(--adsf-accent, #111);
+  border-color: var(--adsf-accent, #111);
+  color: #fff;
+  filter: none;
+}
+.adsf-card__add:focus-visible { outline: 2px solid var(--adsf-accent, #111); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   .adsf-card, .adsf-card__img { transition: none; }
@@ -1029,3 +1041,49 @@ body.adsf-collection-active .collection__filters { display: none !important; }
 .adsf-card { position: relative; }
 .adsf-wishlist { position: absolute; top: 10px; right: 10px; z-index: 2; }
 .adsf-wishlist button { background: transparent; border: 0; padding: 0; cursor: pointer; display: flex; color: #121212; }
+
+
+/* ---- Hover states for every interactive piece --------------------------- */
+/* Product title: a quiet underline on hover so the whole card reads as a link,
+   whatever card hover style the merchant picked. */
+.adsf-card a:hover .adsf-card__title { text-decoration: underline; text-underline-offset: 3px; }
+.adsf-card a:focus-visible { outline: 2px solid var(--adsf-accent, #111); outline-offset: 3px; border-radius: var(--adsf-card-radius, 0); }
+
+/* Recommendation rail */
+.adsf-rec__card { transition: transform .18s ease; }
+.adsf-rec__card img { transition: transform .25s ease, opacity .2s ease; }
+.adsf-rec__card:hover img { opacity: .9; }
+.adsf-rec__card:hover .adsf-rec__title { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Search banners */
+.adsf-banner { transition: transform .18s ease, box-shadow .18s ease; }
+a.adsf-banner:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0, 0, 0, .12); }
+a.adsf-banner:hover .adsf-banner__button { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Filter options */
+.adsf-facet__item label { cursor: pointer; }
+.adsf-facet__item:not(.adsf-facet__item--button):hover .adsf-facet__label { text-decoration: underline; text-underline-offset: 2px; }
+.adsf-facet__item--button label { transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
+.adsf-facet__item--button input:not(:checked) + label:hover {
+  background: var(--adsf-filter-hover-bg, rgba(0, 0, 0, .05));
+  color: var(--adsf-filter-hover-text, inherit);
+}
+.adsf-facet__item--swatch label:hover .adsf-swatch { box-shadow: 0 0 0 2px var(--adsf-accent, #111); }
+.adsf-facet__select { cursor: pointer; transition: border-color .15s ease; }
+.adsf-facet__select:hover { border-color: rgba(0, 0, 0, .45); }
+
+/* Quick View */
+.adsf-qv__close { transition: background-color .15s ease, transform .15s ease; }
+.adsf-qv__close:hover { background: #fff; transform: scale(1.06); }
+.adsf-qv__more:hover { opacity: .75; }
+.adsf-qv__opt select, .adsf-qv__opt input { transition: border-color .15s ease; }
+.adsf-qv__opt select:hover, .adsf-qv__opt input:hover { border-color: rgba(0, 0, 0, .45); }
+
+/* Wishlist heart */
+.adsf-wishlist button { transition: transform .15s ease; }
+.adsf-wishlist button:hover { transform: scale(1.12); }
+
+@media (prefers-reduced-motion: reduce) {
+  .adsf-rec__card, .adsf-banner, .adsf-qv__close, .adsf-wishlist button { transition: none; }
+  a.adsf-banner:hover, .adsf-qv__close:hover, .adsf-wishlist button:hover { transform: none; }
+}

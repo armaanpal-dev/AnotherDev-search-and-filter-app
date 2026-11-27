@@ -239,8 +239,8 @@ export function Hub({
           <s-text color="subdued">{intro}</s-text>
           <s-grid gridTemplateColumns="repeat(auto-fit, minmax(300px, 1fr))" gap="base">
             {items.map((item) => (
+              <div className="adsf-tile" key={item.href + item.title}>
               <s-clickable
-                key={item.href + item.title}
                 href={item.href}
                 padding="base"
                 background="subdued"
@@ -257,6 +257,7 @@ export function Hub({
                   </s-stack>
                 </s-grid>
               </s-clickable>
+              </div>
             ))}
           </s-grid>
         </s-stack>

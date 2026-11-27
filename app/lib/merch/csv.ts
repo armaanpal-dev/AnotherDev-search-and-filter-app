@@ -61,7 +61,7 @@ export function parseCsv(text: string): string[][] {
 const ids = (v: string) => v.split(/[\s;|]+/).map((s) => s.trim()).filter(Boolean);
 
 export function parseRulesCsv(text: string): { rows: RuleCsvRow[]; errors: string[] } {
-  const all = parseCsv(text.replace(/^﻿/, ""));
+  const all = parseCsv(text.replace(/^\uFEFF/, ""));
   const errors: string[] = [];
   const rows: RuleCsvRow[] = [];
   if (!all.length) return { rows, errors: ["The file is empty."] };

@@ -13,6 +13,36 @@ export const BRAND = {
   tint: "linear-gradient(135deg, rgba(255,75,143,.12) 0%, rgba(140,92,255,.16) 100%)",
 };
 
+/**
+ * Hover and focus states for the brand pieces. Inline styles cannot express
+ * :hover, so these live in one stylesheet rendered once by the layout.
+ * Without it the coloured tiles covered Polaris's own hover tint and gave no
+ * feedback at all.
+ */
+const HOVER_CSS = `
+.adsf-tile { display: block; border-radius: 12px; transition: transform .18s ease, box-shadow .18s ease; }
+.adsf-tile:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(16,19,54,.10), 0 0 0 1px rgba(140,92,255,.35); }
+.adsf-tile:focus-visible { outline: 2px solid ${"#8C5CFF"}; outline-offset: 2px; }
+.adsf-icon { transition: background .18s ease, color .18s ease; }
+.adsf-tile:hover .adsf-icon { background: ${"linear-gradient(135deg, #FF4B8F 0%, #8C5CFF 100%)"} !important; color: #fff !important; }
+.adsf-stat { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.adsf-stat-link:hover .adsf-stat { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(16,19,54,.10); border-color: rgba(140,92,255,.35) !important; }
+.adsf-hero-cta { transition: transform .15s ease, box-shadow .15s ease, filter .15s ease; }
+.adsf-hero-link:hover .adsf-hero-cta { transform: translateY(-1px); filter: brightness(1.08); box-shadow: 0 6px 18px rgba(255,75,143,.45) !important; }
+.adsf-crumb { border-radius: 4px; transition: color .15s ease, background .15s ease; }
+.adsf-crumb:hover { text-decoration: underline !important; text-underline-offset: 3px; }
+.adsf-crumb:focus-visible { outline: 2px solid #8C5CFF; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .adsf-tile, .adsf-stat, .adsf-hero-cta { transition: none; }
+  .adsf-tile:hover, .adsf-stat-link:hover .adsf-stat, .adsf-hero-link:hover .adsf-hero-cta { transform: none; }
+}
+`;
+
+/** Render once in the layout. */
+export function BrandStyles() {
+  return <style>{HOVER_CSS}</style>;
+}
+
 /** One accent per metric, so a row of numbers is scannable at a glance. */
 export const ACCENTS = {
   pink: { fg: "#D6286E", bg: "rgba(255,75,143,.12)" },
@@ -95,8 +125,10 @@ export function BrandHero({
       </div>
       {action && (
         // s-button cannot take a custom background; the hero's one action does.
+        <div className="adsf-hero-link">
         <s-clickable href={action.href} borderRadius="base">
           <span
+            className="adsf-hero-cta"
             style={{
               display: "inline-block",
               background: BRAND.gradient,
@@ -112,6 +144,7 @@ export function BrandHero({
             {action.label}
           </span>
         </s-clickable>
+        </div>
       )}
     </div>
   );
@@ -136,6 +169,7 @@ export function ColorStat({
   const a = ACCENTS[accent];
   const body = (
     <div
+      className="adsf-stat"
       style={{
         position: "relative",
         overflow: "hidden",
@@ -170,9 +204,11 @@ export function ColorStat({
     </div>
   );
   return href ? (
-    <s-clickable href={href} borderRadius="base">
-      {body}
-    </s-clickable>
+    <div className="adsf-stat-link" style={{ height: "100%" }}>
+      <s-clickable href={href} borderRadius="base">
+        {body}
+      </s-clickable>
+    </div>
   ) : (
     body
   );
@@ -204,6 +240,7 @@ export function Progress({ done, total, label }: { done: number; total: number; 
 export function BrandIcon({ type }: { type: string }) {
   return (
     <span
+      className="adsf-icon"
       style={{
         display: "inline-flex",
         alignItems: "center",

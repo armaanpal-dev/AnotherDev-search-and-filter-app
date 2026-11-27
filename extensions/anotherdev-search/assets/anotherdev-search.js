@@ -1276,7 +1276,7 @@
     var Dialog = window.customElements && customElements.get("modal-dialog");
     if (!Ctor || typeof Ctor.prototype.preprocessHTML !== "function") return null;
     if (!Dialog || typeof Dialog.prototype.show !== "function") return null;
-    if (typeof window.HTMLUpdateUtility === "undefined" || typeof HTMLUpdateUtility.setInnerHTML !== "function") return null;
+    if (typeof window.HTMLUpdateUtility === "undefined" || typeof window.HTMLUpdateUtility.setInnerHTML !== "function") return null;
     var modal = document.querySelector("quick-add-modal");
     var built = false;
     if (!modal) {
@@ -1307,7 +1307,7 @@
         // keeps the theme's variant, price, media and cart components.
         modal.preprocessHTML(product);
         var content = modal.querySelector('[id^="QuickAddInfo-"]');
-        HTMLUpdateUtility.setInnerHTML(content, product.outerHTML);
+        window.HTMLUpdateUtility.setInnerHTML(content, product.outerHTML);
         var names = ["product-info", "product-form", "variant-selects"].filter(function (n) { return content.querySelector(n); });
         return Promise.all(names.map(function (n) { return customElements.whenDefined(n); }));
       })
@@ -1882,9 +1882,11 @@
       return '<article class="adsf-card' + (p.pinned ? " adsf-card--pinned" : "") + '" data-adsf-mp="' + esc(p.handle) + '">' +
         (wishlistReady(cfg) ? wishlistButton(p) : "") +
         '<a href="' + esc(shopUrl("products/" + p.handle)) + '" data-adsf-hit="' + esc(p.productId) + '">' +
+        '<span class="adsf-card__media">' +
         (p.imageUrl
           ? '<img class="adsf-card__img" src="' + esc(p.imageUrl) + '" alt="' + esc(p.imageAlt || p.title) + '" loading="lazy" width="300" height="300">'
           : '<span class="adsf-card__noimg"></span>') +
+        "</span>" +
         '<h3 class="adsf-card__title">' + esc(p.title) + "</h3>" +
         (cfg.showVendor && p.vendor ? '<div class="adsf-card__vendor">' + esc(p.vendor) + "</div>" : "") +
         '<div class="adsf-card__price">' + esc(priceRange(p, cfg)) + "</div>" +
@@ -3724,6 +3726,10 @@
     if (s.cardButtonText) rs.setProperty("--adsf-card-btn-text", s.cardButtonText);
     if (s.cardButtonRadius != null) rs.setProperty("--adsf-card-btn-radius", s.cardButtonRadius + "px");
     rs.setProperty("--adsf-card-btn-self", s.cardButtonFullWidth === false ? "flex-start" : "stretch");
+    document.documentElement.classList.toggle(
+      "adsf-btn-clear",
+      !s.cardButtonBg || /^(transparent|none|rgba\([^)]*,\s*0\))$/i.test(String(s.cardButtonBg).trim()),
+    );
     // Chrome and hover are classes, not variables: CSS cannot switch a whole
     // rule on the value of a custom property.
     var root = document.documentElement;
